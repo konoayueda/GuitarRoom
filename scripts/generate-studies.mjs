@@ -30,7 +30,7 @@ for (let k = 0; k < 3; k++) {
             [-1, -1, 0, 2, 3, 2],
           ];
   let s =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 1188"><rect width="840" height="1188" fill="#fffdf8"/><g fill="#39382f" font-family="Microsoft YaHei, sans-serif"><text x="65" y="65" font-size="13" letter-spacing="3" fill="#b45b40">弦间 / ORIGINAL STUDY 0' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="840" height="1188" viewBox="0 0 840 1188"><rect width="840" height="1188" fill="#fffdf8"/><g fill="#39382f" font-family="Microsoft YaHei, sans-serif"><text x="65" y="65" font-size="13" letter-spacing="3" fill="#b45b40">弦间 / ORIGINAL STUDY 0' +
     (k + 1) +
     '</text><text x="65" y="136" font-size="37" font-family="SimSun,serif">' +
     titles[k] +

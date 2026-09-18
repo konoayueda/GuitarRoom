@@ -1,3 +1,5 @@
+import { normalizeArrangement, type Arrangement } from "./arrangement";
+
 export type Annotation = {
   id: string;
   pageId: string;
@@ -34,7 +36,9 @@ export type Score = {
   lastOpened: number;
   lastPage: number;
   demoId?: number;
+  arrangement?: Arrangement;
 };
+export type ScoreLibrary = { scores: Score[]; dismissedDemoIds: string[] };
 export const statusLabels = {
   planned: "想练",
   practicing: "正在练习",
@@ -76,3 +80,9 @@ export function pageUrl(page: ScorePage) {
 }
 
 export type ScorePatch = Partial<Score> | ((current: Score) => Partial<Score>);
+
+export function normalizeScore(score: Score): Score {
+  return score.arrangement
+    ? { ...score, arrangement: normalizeArrangement(score.arrangement) }
+    : score;
+}

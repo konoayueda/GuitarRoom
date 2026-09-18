@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "dist/**",
     "public/pdf/**",
+    "public/ocr/**",
     ".qa/**",
     ".wrangler/**",
     ".vinext/**",

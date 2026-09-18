@@ -15,12 +15,13 @@ import {
   Download,
   Heart,
   Play,
-  Pause,
   Music2,
   Settings2,
   Check,
   Trash2,
   NotebookPen,
+  ScanLine,
+  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -36,9 +37,21 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Slider } from "@/components/ui/slider";
 import { Choice } from "./room-controls";
-import ScoreCanvas from "./score-canvas";
+import ScoreCanvas, { type ScoreCanvasHandle } from "./score-canvas";
+import ArrangementEditor, {
+  type ArrangementEditorHandle,
+} from "./arrangement-editor";
+import ArrangementReader from "./arrangement-reader";
+import ScorePageStrip from "./score-page-strip";
+import PerformanceReader from "./performance-reader";
+import RecognitionReview, {
+  type RecognitionProgress,
+} from "./recognition-review";
+import { recognizeTab } from "@/lib/tab-recognizer";
+import type { RecognitionDraft, RecognitionRect } from "@/lib/recognition";
+import { EMPTY_ARRANGEMENT, type Arrangement } from "@/lib/arrangement";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MetronomeControls, useMetronome } from "./metronome";
 import {
   type Score,
@@ -54,14 +67,31 @@ export default function Reader({
   onBack,
   onLab,
   onExport,
+  onDelete,
+  arrangementDraft,
+  onArrangementDraft,
+  recognitionDraft,
+  onRecognitionDraft,
 }: {
   score: Score;
   onPatch: Patch;
   onBack: () => void;
   onLab: () => void;
   onExport: (s: Score) => void;
+  onDelete: () => void;
+  recognitionDraft?: RecognitionDraft;
+  onRecognitionDraft: (
+    draft: RecognitionDraft | undefined,
+    expectedId?: string,
+  ) => void;
+  arrangementDraft?: Arrangement;
+  onArrangementDraft: (
+    a: Arrangement | undefined,
+    expected?: Arrangement,
+  ) => void;
 }) {
   const metronome = useMetronome();
+  const [mode, setMode] = useState("score");
   const [narrow, setNarrow] = useState(false),
     [toolsOpen, setToolsOpen] = useState(false);
   useEffect(() => {
@@ -83,8 +113,7 @@ export default function Reader({
     [meta, setMeta] = useState(score),
     [note, setNote] = useState(score.note),
     [saving, setSaving] = useState(false),
-    [scrolling, setScrolling] = useState(false),
-    [speed, setSpeed] = useState(25),
+    [performing, setPerforming] = useState(false),
     [ready, setReady] = useState(false);
   const previousNote = useRef(score.note);
   useEffect(() => {
@@ -102,6 +131,142 @@ export default function Reader({
     } | null>(null);
   const page = score.pages[index] || score.pages[0];
   const annotations = score.annotations.filter((a) => a.pageId === page.id);
+  const canvasRef = useRef<ScoreCanvasHandle>(null);
+  const editorRef = useRef<ArrangementEditorHandle>(null);
+  const recognitionJob = useRef<AbortController | null>(null);
+  const cropStart = useRef<{ x: number; y: number } | null>(null);
+  const appended = useRef(new Set<string>());
+  const [cropMode, setCropMode] = useState(false);
+  const [cropSelection, setCropSelection] = useState<RecognitionRect | null>(
+    null,
+  );
+  const [recognitionOpen, setRecognitionOpen] = useState(false);
+  const [recognitionProgress, setRecognitionProgress] =
+    useState<RecognitionProgress>();
+  const [recognitionError, setRecognitionError] = useState<string>();
+  useEffect(() => {
+    return () => {
+      recognitionJob.current?.abort();
+      recognitionJob.current = null;
+    };
+  }, [page.id, page.rotation, mode]);
+  function openRecognition() {
+    metronome.stop();
+    if (recognitionDraft) {
+      setRecognitionError(undefined);
+      setRecognitionProgress(undefined);
+      setRecognitionOpen(true);
+    } else beginCrop();
+  }
+  function beginCrop() {
+    recognitionJob.current?.abort();
+    recognitionJob.current = null;
+    setRecognitionProgress(undefined);
+    setRecognitionError(undefined);
+    setRecognitionOpen(false);
+
+    setMarking(false);
+    setCropSelection(null);
+    setMode("score");
+    setCropMode(true);
+  }
+  function closeRecognition(open: boolean) {
+    if (!open) {
+      recognitionJob.current?.abort();
+      recognitionJob.current = null;
+      setRecognitionProgress(undefined);
+      setRecognitionError(undefined);
+    }
+    setRecognitionOpen(open);
+  }
+  async function readCrop(rect: RecognitionRect) {
+    const capture = canvasRef.current;
+    if (!capture) return;
+    recognitionJob.current?.abort();
+    const job = new AbortController();
+    recognitionJob.current = job;
+    const meter = (arrangementDraft ?? score.arrangement ?? EMPTY_ARRANGEMENT)
+      .meter;
+    const sourcePage = page,
+      pageNumber = index + 1;
+    setCropMode(false);
+    setCropSelection(null);
+    setRecognitionError(undefined);
+    setRecognitionOpen(true);
+    setRecognitionProgress({ message: "正在提取高清原图片段…", value: 0.02 });
+    try {
+      const canvas = await capture.capture(rect, job.signal);
+      const result = await recognizeTab(
+        canvas,
+        meter,
+        job.signal,
+        (message, value) => {
+          if (!job.signal.aborted) setRecognitionProgress({ message, value });
+        },
+      );
+      if (job.signal.aborted) return;
+      onRecognitionDraft({
+        id: crypto.randomUUID(),
+        pageId: sourcePage.id,
+        pageNumber,
+        rotation: sourcePage.rotation,
+        rect,
+        image: canvas.toDataURL("image/png"),
+        width: canvas.width,
+        height: canvas.height,
+        meter,
+        ...result,
+      });
+    } catch (error) {
+      if (!job.signal.aborted)
+        setRecognitionError(
+          error instanceof Error
+            ? error.message
+            : "读取失败，请重新框选一个清晰片段。",
+        );
+    } finally {
+      if (recognitionJob.current === job) {
+        recognitionJob.current = null;
+        setRecognitionProgress(undefined);
+      }
+    }
+  }
+  function finishCrop(e: React.PointerEvent<HTMLDivElement>) {
+    if (!cropStart.current) return;
+    const p = coords(e),
+      a = cropStart.current;
+    cropStart.current = null;
+    const rect = {
+      x: Math.min(a.x, p.x),
+      y: Math.min(a.y, p.y),
+      w: Math.abs(p.x - a.x),
+      h: Math.abs(p.y - a.y),
+    };
+    setCropSelection(null);
+    if (rect.w < 0.08 || rect.h < 0.015) {
+      toast.error("框选范围太小，请包含完整的六条弦线和左右小节线。");
+      return;
+    }
+    void readCrop(rect);
+  }
+  function appendRecognition() {
+    if (
+      !recognitionDraft ||
+      !editorRef.current ||
+      appended.current.has(recognitionDraft.id)
+    )
+      return;
+    try {
+      editorRef.current.appendRecognition(recognitionDraft);
+      appended.current.add(recognitionDraft.id);
+      onRecognitionDraft(undefined, recognitionDraft.id);
+      setRecognitionOpen(false);
+      setMode("arrange");
+      toast.success("已追加识别片段，可直接编辑、试听或撤销；记得保存编排。");
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
   const persist = useCallback(
     async (patch: ScorePatch) => {
       try {
@@ -115,17 +280,26 @@ export default function Reader({
   );
   const navigate = useCallback(
     (n: number) => {
-      if (n < 0 || n >= score.pages.length) return;
-      setScrolling(false);
+      if (n < 0 || n >= score.pages.length || n === index) return;
+
       setReady(false);
+      cropStart.current = null;
+      setCropMode(false);
+      setCropSelection(null);
       setIndex(n);
       if (scroll.current) scroll.current.scrollTop = 0;
       void persist({ lastPage: n, lastOpened: Date.now() }).catch(() => {});
     },
-    [persist, score.pages.length],
+    [persist, score.pages.length, index],
   );
   useEffect(() => {
+    if (mode !== "score") return;
     const key = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        (e.target as HTMLElement).closest("[role=tablist]")
+      )
+        return;
       if (
         (e.target as HTMLElement).closest(
           "input,textarea,[role=dialog],[role=combobox]",
@@ -144,26 +318,7 @@ export default function Reader({
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [index, navigate]);
-  useEffect(() => {
-    if (!scrolling) return;
-    let frame = 0,
-      last = performance.now();
-    const tick = (now: number) => {
-      const area = scroll.current;
-      if (area) {
-        area.scrollTop += ((now - last) * speed) / 1000;
-        if (area.scrollTop + area.clientHeight >= area.scrollHeight - 1) {
-          setScrolling(false);
-          return;
-        }
-      }
-      last = now;
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [scrolling, speed]);
+  }, [index, navigate, mode]);
   function coords(e: React.PointerEvent<HTMLDivElement>) {
     const r = e.currentTarget.getBoundingClientRect();
     return {
@@ -216,6 +371,9 @@ export default function Reader({
     }
   }
   async function rotate() {
+    cropStart.current = null;
+    setCropMode(false);
+    setCropSelection(null);
     setReady(false);
     await persist((s) => {
       const pages = s.pages.map((p) =>
@@ -238,6 +396,14 @@ export default function Reader({
       [pages[at], pages[at + d]] = [pages[at + d], pages[at]];
       return { pages };
     }).catch(() => {});
+  }
+  function openPerformance() {
+    cropStart.current = null;
+    setCropMode(false);
+    setCropSelection(null);
+    setMarking(false);
+    metronome.stop();
+    setPerforming(true);
   }
   const asideContent = (
     <>
@@ -339,6 +505,13 @@ export default function Reader({
         >
           <Settings2 size={19} />
         </button>
+        <button
+          className="icon-button reader-delete"
+          aria-label="删除当前曲谱"
+          onClick={onDelete}
+        >
+          <Trash2 size={18} />
+        </button>
         {narrow && (
           <button
             className="icon-button"
@@ -363,158 +536,356 @@ export default function Reader({
           {focus ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
         </button>
       </div>
-      <div className="reader-body">
+      <div className="reader-modebar">
+        <Tabs
+          value={mode}
+          onValueChange={(v) => {
+            cropStart.current = null;
+            setCropMode(false);
+            setCropSelection(null);
+            setMode(v);
+          }}
+        >
+          <TabsList variant="line">
+            <TabsTrigger value="score">原谱阅读</TabsTrigger>
+            <TabsTrigger value="read">编排阅读</TabsTrigger>
+            <TabsTrigger value="arrange">
+              编排编辑
+              {arrangementDraft ? (
+                <i className="draft-dot" />
+              ) : score.arrangement ? (
+                <Check
+                  size={13}
+                  className="saved-arrangement-check"
+                  aria-hidden="true"
+                />
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <span>
+          {mode === "arrange"
+            ? "点选谱面，编辑并保存编排"
+            : mode === "read"
+              ? "完整谱面，专心练习"
+              : "上传的图片 / PDF · 阅读与批注"}
+        </span>
+      </div>
+      <div className={"reader-body " + (mode !== "score" ? "arranging" : "")}>
         <div className="reader-workspace">
-          <div className="reader-tools">
-            <div className="tool-group">
-              <button
-                className={
-                  "button " + (marking ? "primary" : "secondary-button")
-                }
-                disabled={!ready}
-                onClick={() => setMarking((v) => !v)}
-              >
-                <PenLine size={15} />
-                {marking ? "在谱上拖动圈选" : "圈选批注"}
-              </button>
-              <button
-                className="icon-button"
-                aria-label={showNotes ? "隐藏批注" : "显示批注"}
-                onClick={() => setShowNotes((v) => !v)}
-              >
-                {showNotes ? <Eye size={17} /> : <EyeOff size={17} />}
-              </button>
-              <button
-                className="icon-button"
-                aria-label="顺时针旋转页面"
-                onClick={rotate}
-              >
-                <RotateCw size={17} />
+          <div className="original-score-workspace">
+            <div className="performance-entry">
+              <div>
+                <strong>放下鼠标，拿起吉他</strong>
+                <span>整份原谱连续展开，倒计时后自动滚动</span>
+              </div>
+              <button className="button primary" onClick={openPerformance}>
+                <Play size={17} />
+                进入演奏阅读
               </button>
             </div>
-            <Choice
-              label="曲谱缩放"
-              value={zoom}
-              onChange={setZoom}
-              options={["75", "100", "125", "150"].map((v) => ({
-                value: v,
-                label: v === "100" ? "适合宽度" : v + "%",
-              }))}
+            <ScorePageStrip
+              pages={score.pages}
+              index={index}
+              onNavigate={navigate}
+              canvasRef={canvasRef}
+              ready={ready}
             />
-          </div>
-          <div
-            className={"sheet-scroll " + (marking ? "marking" : "")}
-            ref={scroll}
-          >
-            <div
-              className="sheet-paper"
-              style={{
-                width: zoom + "%",
-                maxWidth: (900 * Number(zoom)) / 100,
-              }}
-            >
-              <ScoreCanvas
-                page={page}
-                onReady={() => setReady(true)}
-                onLoading={() => setReady(false)}
-              />
-              {ready && (
-                <div
-                  className="annotation-layer"
-                  style={{
-                    touchAction: marking ? "none" : "auto",
-                    pointerEvents: marking || showNotes ? "auto" : "none",
-                  }}
-                  onPointerDown={(e) => {
-                    if (!marking) return;
-                    e.preventDefault();
-                    start.current = coords(e);
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                  }}
-                  onPointerMove={move}
-                  onPointerUp={finish}
-                  onPointerCancel={() => {
-                    start.current = null;
-                    setSelection(null);
+            <div className="reader-tools">
+              <div className="tool-group">
+                <button
+                  className={
+                    "button " + (cropMode ? "primary" : "secondary-button")
+                  }
+                  disabled={!ready}
+                  onClick={() =>
+                    cropMode ? setCropMode(false) : openRecognition()
+                  }
+                >
+                  <ScanLine size={15} />
+                  {cropMode
+                    ? "正在框选"
+                    : recognitionDraft
+                      ? "继续校对"
+                      : "框选识别"}
+                  {recognitionDraft && <i className="draft-dot" />}
+                </button>
+                <button
+                  className={
+                    "button " + (marking ? "primary" : "secondary-button")
+                  }
+                  disabled={!ready}
+                  onClick={() => {
+                    setCropMode(false);
+                    setMarking((v) => !v);
                   }}
                 >
-                  {showNotes &&
-                    annotations.map((a, i) => (
-                      <button
-                        key={a.id}
-                        aria-label={"批注 " + (i + 1) + "：" + a.text}
-                        title={a.text}
-                        className={
-                          "annotation " +
-                          (a.w > 0.015 && a.h > 0.015
-                            ? "annotation-box"
-                            : "annotation-pin")
-                        }
-                        style={{
-                          left: a.x * 100 + "%",
-                          top: a.y * 100 + "%",
-                          width: a.w > 0.015 ? a.w * 100 + "%" : undefined,
-                          height: a.h > 0.015 ? a.h * 100 + "%" : undefined,
-                        }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={() => setDraft({ ...a })}
-                      >
-                        <span>{i + 1}</span>
-                      </button>
-                    ))}
-                  {selection && (
-                    <div
-                      className="annotation annotation-box"
-                      style={{
-                        left: selection.x * 100 + "%",
-                        top: selection.y * 100 + "%",
-                        width: selection.w * 100 + "%",
-                        height: selection.h * 100 + "%",
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="reader-bottom">
-            <div className="tool-group">
-              <button
-                className="icon-button"
-                disabled={index === 0}
-                aria-label="上一页"
-                onClick={() => navigate(index - 1)}
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <span>
-                第 {index + 1} / {score.pages.length} 页
-              </span>
-              <button
-                className="icon-button"
-                disabled={index >= score.pages.length - 1}
-                aria-label="下一页"
-                onClick={() => navigate(index + 1)}
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-            <div className="auto-scroll">
-              <button
-                className="button secondary-button"
-                onClick={() => setScrolling((v) => !v)}
-              >
-                {scrolling ? <Pause size={14} /> : <Play size={14} />}自动滚动
-              </button>
-              <Slider
-                aria-label="自动滚动速度"
-                min={10}
-                max={100}
-                value={[speed]}
-                onValueChange={(v) => setSpeed(v[0])}
+                  <PenLine size={15} />
+                  {marking ? "在谱上拖动圈选" : "圈选批注"}
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={showNotes ? "隐藏批注" : "显示批注"}
+                  onClick={() => setShowNotes((v) => !v)}
+                >
+                  {showNotes ? <Eye size={17} /> : <EyeOff size={17} />}
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="顺时针旋转页面"
+                  onClick={rotate}
+                >
+                  <RotateCw size={17} />
+                </button>
+              </div>
+              <Choice
+                label="曲谱缩放"
+                value={zoom}
+                onChange={setZoom}
+                options={["75", "100", "125", "150"].map((v) => ({
+                  value: v,
+                  label: v === "100" ? "适合宽度" : v + "%",
+                }))}
               />
             </div>
+            {(arrangementDraft || score.arrangement) && !cropMode && (
+              <div className="reader-version-notice" role="note">
+                <NotebookPen size={19} aria-hidden="true" />
+                <p>
+                  <strong>
+                    {arrangementDraft
+                      ? "编排还有未保存的修改"
+                      : "已有保存的编排"}
+                  </strong>
+                  <span>
+                    {arrangementDraft
+                      ? "当前显示上传原谱，返回编排即可继续编辑并保存。"
+                      : "已保存的谱面可在「编排阅读」中完整查看与练习。"}
+                  </span>
+                </p>
+                <button
+                  className="button secondary-button"
+                  onClick={() => {
+                    cropStart.current = null;
+                    setCropMode(false);
+                    setCropSelection(null);
+
+                    setMode(arrangementDraft ? "arrange" : "read");
+                  }}
+                >
+                  {arrangementDraft ? "返回编排草稿" : "查看已保存编排"}
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            )}
+            {cropMode && (
+              <div className="recognition-crop-hint">
+                <ScanLine size={17} />
+                <p>
+                  <strong>框选一行六线谱</strong>
+                  <span>
+                    包含六条弦线、左右小节线和上下留白，建议 1–4
+                    小节。拍点需识别后核对。
+                  </span>
+                </p>
+                <button
+                  className="icon-button"
+                  aria-label="取消框选识别"
+                  onClick={() => setCropMode(false)}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            )}
+            <div
+              className={"sheet-scroll " + (marking ? "marking" : "")}
+              ref={scroll}
+            >
+              <div
+                className="sheet-paper"
+                style={{
+                  width: zoom + "%",
+                  maxWidth: (900 * Number(zoom)) / 100,
+                }}
+              >
+                <ScoreCanvas
+                  ref={canvasRef}
+                  page={page}
+                  onReady={() => setReady(true)}
+                  onLoading={() => setReady(false)}
+                />
+                {ready && cropMode && (
+                  <div
+                    className="recognition-crop-layer"
+                    aria-label="拖动框选六线谱识别区域"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      cropStart.current = coords(e);
+                      setCropSelection(null);
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={(e) => {
+                      if (!cropStart.current) return;
+                      const p = coords(e),
+                        a = cropStart.current;
+                      setCropSelection({
+                        x: Math.min(a.x, p.x),
+                        y: Math.min(a.y, p.y),
+                        w: Math.abs(a.x - p.x),
+                        h: Math.abs(a.y - p.y),
+                      });
+                    }}
+                    onPointerUp={finishCrop}
+                    onPointerCancel={() => {
+                      cropStart.current = null;
+                      setCropSelection(null);
+                    }}
+                  >
+                    {cropSelection && (
+                      <div
+                        className="recognition-crop-rect"
+                        style={{
+                          left: cropSelection.x * 100 + "%",
+                          top: cropSelection.y * 100 + "%",
+                          width: cropSelection.w * 100 + "%",
+                          height: cropSelection.h * 100 + "%",
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+                {ready && (
+                  <div
+                    className="annotation-layer"
+                    style={{
+                      touchAction: marking ? "none" : "auto",
+                      pointerEvents: marking || showNotes ? "auto" : "none",
+                    }}
+                    onPointerDown={(e) => {
+                      if (!marking) return;
+                      e.preventDefault();
+                      start.current = coords(e);
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={move}
+                    onPointerUp={finish}
+                    onPointerCancel={() => {
+                      start.current = null;
+                      setSelection(null);
+                    }}
+                  >
+                    {showNotes &&
+                      annotations.map((a, i) => (
+                        <button
+                          key={a.id}
+                          aria-label={"批注 " + (i + 1) + "：" + a.text}
+                          title={a.text}
+                          className={
+                            "annotation " +
+                            (a.w > 0.015 && a.h > 0.015
+                              ? "annotation-box"
+                              : "annotation-pin")
+                          }
+                          style={{
+                            left: a.x * 100 + "%",
+                            top: a.y * 100 + "%",
+                            width: a.w > 0.015 ? a.w * 100 + "%" : undefined,
+                            height: a.h > 0.015 ? a.h * 100 + "%" : undefined,
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setDraft({ ...a })}
+                        >
+                          <span>{i + 1}</span>
+                        </button>
+                      ))}
+                    {selection && (
+                      <div
+                        className="annotation annotation-box"
+                        style={{
+                          left: selection.x * 100 + "%",
+                          top: selection.y * 100 + "%",
+                          width: selection.w * 100 + "%",
+                          height: selection.h * 100 + "%",
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="reader-bottom">
+              <div className="tool-group">
+                <button
+                  className="icon-button"
+                  disabled={index === 0}
+                  aria-label="上一页"
+                  onClick={() => navigate(index - 1)}
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <span>
+                  第 {index + 1} / {score.pages.length} 页
+                </span>
+                <button
+                  className="icon-button"
+                  disabled={index >= score.pages.length - 1}
+                  aria-label="下一页"
+                  onClick={() => navigate(index + 1)}
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <button className="button primary" onClick={openPerformance}>
+                <Play size={16} />
+                演奏阅读 · 自动滚谱
+              </button>
+            </div>
           </div>
+        </div>
+        <div className="arrangement-reading-mount" hidden={mode !== "read"}>
+          <ArrangementReader
+            score={score}
+            draft={arrangementDraft}
+            active={mode === "read"}
+            stopPlayback={metronome.running}
+            onEdit={() => setMode("arrange")}
+            onPlay={() => {
+              metronome.stop();
+            }}
+          />
+        </div>
+        <div className="arrangement-mount" hidden={mode !== "arrange"}>
+          <ArrangementEditor
+            ref={editorRef}
+            onRecognize={openRecognition}
+            onRead={() => setMode("read")}
+            stopPlayback={metronome.running}
+            score={score}
+            draft={arrangementDraft}
+            onDraft={onArrangementDraft}
+            active={mode === "arrange"}
+            currentPageId={page.id}
+            onPlay={() => {
+              metronome.stop();
+            }}
+            onShowPage={(id) => {
+              const n = score.pages.findIndex((p) => p.id === id);
+              if (n >= 0) navigate(n);
+              setMode("score");
+            }}
+            onSave={async (arrangement, base) => {
+              await onPatch(score.id, (current) => {
+                if (
+                  JSON.stringify(current.arrangement ?? null) !==
+                  JSON.stringify(base ?? null)
+                )
+                  throw new Error(
+                    "这份编排已有新的修改，请先导出当前草稿，再刷新核对。",
+                  );
+                return { arrangement };
+              });
+            }}
+          />
         </div>
         {narrow ? (
           <Sheet open={toolsOpen} onOpenChange={setToolsOpen}>
@@ -532,6 +903,31 @@ export default function Reader({
           <aside className="reader-aside">{asideContent}</aside>
         )}
       </div>
+      {performing && (
+        <PerformanceReader
+          score={score}
+          initialPage={index}
+          onClose={(pageIndex) => {
+            setPerforming(false);
+            navigate(pageIndex);
+          }}
+        />
+      )}
+      <RecognitionReview
+        open={recognitionOpen}
+        onOpenChange={closeRecognition}
+        draft={recognitionDraft}
+        onChange={onRecognitionDraft}
+        onAppend={appendRecognition}
+        onReselect={beginCrop}
+        onDiscard={() => {
+          if (recognitionDraft)
+            onRecognitionDraft(undefined, recognitionDraft.id);
+          closeRecognition(false);
+        }}
+        progress={recognitionProgress}
+        error={recognitionError}
+      />
       <Dialog
         open={!!draft}
         onOpenChange={(v) => {

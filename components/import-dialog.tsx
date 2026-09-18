@@ -122,7 +122,12 @@ export default function ImportDialog({
       setTitle("");
       setArtist("");
       setTags("");
-      toast.success("曲谱已存入你的琴房");
+      toast.success(`已导入 ${score.pages.length} 页曲谱`, {
+        description:
+          score.pages.length > 1
+            ? "打开曲谱后，可在顶部页面预览中选择需要的页。"
+            : undefined,
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {

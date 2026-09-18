@@ -15,7 +15,7 @@ import {
   FolderHeart,
   FileText,
   RefreshCw,
-  LogIn,
+  Trash2,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -30,10 +30,29 @@ import {
 } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster, toast } from "sonner";
-import { DEMOS, pageUrl, type Score, type ScorePatch } from "@/lib/models";
+import {
+  DEMOS,
+  normalizeScore,
+  pageUrl,
+  type Score,
+  type ScorePatch,
+  type ScoreLibrary,
+} from "@/lib/models";
 import { api, jsonBody, downloadBlob, Choice } from "./room-controls";
 import ImportDialog from "./import-dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "./ui/alert-dialog";
 import Reader from "./reader";
+import type { RecognitionDraft } from "@/lib/recognition";
+import type { Arrangement } from "@/lib/arrangement";
 import ChordLab from "./chord-lab";
 import Metronome from "./metronome";
 import { CHORDS } from "@/lib/chords";
@@ -113,11 +132,7 @@ function Staff({ demoId = 0 }: { demoId?: number }) {
     </svg>
   );
 }
-export default function GuitarRoom({
-  signedIn = false,
-}: {
-  signedIn?: boolean;
-}) {
+export default function GuitarRoom() {
   const [scores, setScores] = useState<Score[]>(DEMOS),
     [view, setView] = useState("library"),
     [active, setActive] = useState<string | null>(null),
@@ -128,42 +143,85 @@ export default function GuitarRoom({
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [exporting, setExporting] = useState(false);
+  const [arrangementDrafts, setArrangementDrafts] = useState<
+    Record<string, Arrangement>
+  >({});
+  const [recognitionDrafts, setRecognitionDrafts] = useState<
+    Record<string, RecognitionDraft>
+  >({});
+  useEffect(() => {
+    if (
+      !Object.keys(arrangementDrafts).length &&
+      !Object.keys(recognitionDrafts).length
+    )
+      return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [arrangementDrafts, recognitionDrafts]);
+  const [deleteTarget, setDeleteTarget] = useState<Score | null>(null),
+    [deleting, setDeleting] = useState(false),
+    [deleteError, setDeleteError] = useState("");
+  const deletingIds = useRef(new Set<string>());
+  const confirmedDeletedIds = useRef(new Set<string>());
   const ref = useRef(scores),
     persisted = useRef(new Set<string>()),
     queue = useRef<Promise<unknown>>(Promise.resolve());
   const load = useCallback(async () => {
-    if (!signedIn) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
+    const startingVersions = new Map(
+      ref.current.map((s) => [s.id, s.updatedAt]),
+    );
     try {
-      const data = await api<Score[]>("/api/scores");
-      persisted.current = new Set(data.map((s) => s.id));
+      const library = await api<ScoreLibrary | Score[]>("/api/scores");
+      const data = (Array.isArray(library) ? library : library.scores).map(
+        normalizeScore,
+      );
+      const dismissed = Array.isArray(library) ? [] : library.dismissedDemoIds;
+      // A delayed list response must not roll back completed saves or imports.
+      const merged = new Map(data.map((s) => [s.id, s]));
+      for (const local of ref.current) {
+        const remote = merged.get(local.id);
+        if (
+          remote
+            ? local.updatedAt > remote.updatedAt
+            : persisted.current.has(local.id) &&
+              startingVersions.get(local.id) !== local.updatedAt
+        )
+          merged.set(local.id, local);
+      }
+      persisted.current = new Set(merged.keys());
       const all = [
-        ...data,
-        ...DEMOS.filter((s) => !persisted.current.has(s.id)),
+        ...merged.values(),
+        ...DEMOS.filter(
+          (s) => !persisted.current.has(s.id) && !dismissed.includes(s.id),
+        ),
       ];
-      ref.current = all;
-      setScores(all);
+      const visible = all.filter((s) => !confirmedDeletedIds.current.has(s.id));
+      ref.current = visible;
+      setScores(visible);
       setError("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [signedIn]);
+  }, []);
   useEffect(() => {
-    // This effect initializes data from the authenticated storage API.
+    // This effect initializes the personal room from its storage API.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
   const update = useCallback(
     (id: string, change: ScorePatch): Promise<Score> => {
+      if (deletingIds.current.has(id))
+        return Promise.reject(new Error("曲谱正在删除，请稍候。"));
       const task = queue.current
         .catch(() => {})
         .then(async () => {
-          if (!signedIn) throw new Error("请先登录，再保存曲谱和笔记。");
           let current = ref.current.find((s) => s.id === id);
           if (!current) throw new Error("找不到曲谱。");
           if (!persisted.current.has(id) && current.demoId !== undefined) {
@@ -188,10 +246,12 @@ export default function GuitarRoom({
                 }
               : {}),
           };
-          const result = await api<Score>("/api/scores/" + id, {
-            method: "PATCH",
-            ...jsonBody(normalized),
-          });
+          const result = normalizeScore(
+            await api<Score>("/api/scores/" + id, {
+              method: "PATCH",
+              ...jsonBody(normalized),
+            }),
+          );
           ref.current = ref.current.map((s) => (s.id === id ? result : s));
           setScores(ref.current);
           return result;
@@ -199,16 +259,70 @@ export default function GuitarRoom({
       queue.current = task;
       return task;
     },
-    [signedIn],
+    [],
   );
+  function requestDelete(score: Score) {
+    setDeleteError("");
+    setDeleteTarget(score);
+  }
+  async function removeScore() {
+    if (!deleteTarget || deletingIds.current.has(deleteTarget.id)) return;
+    const id = deleteTarget.id;
+    deletingIds.current.add(id);
+    setDeleting(true);
+    setDeleteError("");
+    const task = queue.current
+      .catch(() => {})
+      .then(async () => {
+        const current = ref.current.find((s) => s.id === id);
+        if (!current) throw new Error("找不到曲谱，请刷新曲谱库。");
+        const result = await api<{ deleted: boolean; cleanupPending: boolean }>(
+          "/api/scores/" + id,
+          {
+            method: "DELETE",
+            ...jsonBody({ expectedUpdatedAt: current.updatedAt }),
+          },
+        );
+        confirmedDeletedIds.current.add(id);
+        ref.current = ref.current.filter((s) => s.id !== id);
+        setScores(ref.current);
+        persisted.current.delete(id);
+        setArrangementDrafts((old) => {
+          const next = { ...old };
+          delete next[id];
+          return next;
+        });
+        setRecognitionDrafts((old) => {
+          const next = { ...old };
+          delete next[id];
+          return next;
+        });
+        if (active === id) {
+          setActive(null);
+          setView("library");
+        }
+        setDeleteTarget(null);
+        if (result.cleanupPending)
+          toast.warning("曲谱已移除，原文件暂未清理；再次打开曲谱库时会重试。");
+        else toast.success("曲谱及其原文件、笔记和编排已删除");
+      });
+    queue.current = task;
+    try {
+      await task;
+    } catch (e) {
+      setDeleteError((e as Error).message);
+    } finally {
+      deletingIds.current.delete(id);
+      setDeleting(false);
+    }
+  }
   function openScore(score: Score) {
     setActive(score.id);
     setView("reader");
     window.scrollTo(0, 0);
-    if (signedIn)
-      void update(score.id, { lastOpened: Date.now() }).catch((e) =>
-        toast.error(e.message),
-      );
+    void update(score.id, { lastOpened: Date.now() }).catch((e) =>
+      toast.error(e.message),
+    );
   }
   const actions = useRef({ openScore });
   useEffect(() => {
@@ -345,8 +459,7 @@ export default function GuitarRoom({
     }
   }
   const selected = scores.find((s) => s.id === active);
-  const recent =
-    [...scores].sort((a, b) => b.lastOpened - a.lastOpened)[0] || DEMOS[0];
+  const recent = [...scores].sort((a, b) => b.lastOpened - a.lastOpened)[0];
   const visible = scores
     .filter(
       (s) =>
@@ -421,8 +534,8 @@ export default function GuitarRoom({
         <SidebarFooter className="sidebar-footer">
           <div className="avatar">我</div>
           <div>
-            <strong>我的私人琴房</strong>
-            <span>{signedIn ? "曲谱与笔记，妥善收藏" : "先用示范谱试试"}</span>
+            <strong>我的吉他琴房</strong>
+            <span>曲谱与笔记，妥善收藏</span>
           </div>
         </SidebarFooter>
       </Sidebar>
@@ -447,15 +560,6 @@ export default function GuitarRoom({
             让练习，慢慢成为日常
           </span>
         </header>
-        {!signedIn && (
-          <div className="signin-banner">
-            <span>示范谱可以直接练习；登录后保存自己的曲谱与笔记。</span>
-            <a href="/signin-with-chatgpt?return_to=/" target="_top">
-              <LogIn size={15} />
-              登录我的琴房
-            </a>
-          </div>
-        )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -473,6 +577,32 @@ export default function GuitarRoom({
             onBack={() => setView("library")}
             onLab={() => setView("lab")}
             onExport={(s) => void backup([s])}
+            onDelete={() => requestDelete(selected)}
+            recognitionDraft={recognitionDrafts[selected.id]}
+            onRecognitionDraft={(draft, expectedId) =>
+              setRecognitionDrafts((old) => {
+                if (expectedId && old[selected.id]?.id !== expectedId)
+                  return old;
+                const next = { ...old };
+                if (draft) next[selected.id] = draft;
+                else delete next[selected.id];
+                return next;
+              })
+            }
+            arrangementDraft={arrangementDrafts[selected.id]}
+            onArrangementDraft={(draft, expected) =>
+              setArrangementDrafts((old) => {
+                if (
+                  expected &&
+                  JSON.stringify(old[selected.id]) !== JSON.stringify(expected)
+                )
+                  return old;
+                const next = { ...old };
+                if (draft) next[selected.id] = draft;
+                else delete next[selected.id];
+                return next;
+              })
+            }
           />
         ) : view === "lab" ? (
           <ChordLab
@@ -502,7 +632,7 @@ export default function GuitarRoom({
                 导入曲谱
               </button>
             </div>
-            {view !== "favorites" && (
+            {view !== "favorites" && recent && (
               <section className="welcome-grid">
                 <div className="practice-feature">
                   <div className="feature-copy">
@@ -674,6 +804,17 @@ export default function GuitarRoom({
                       />
                     </button>
                   </div>
+                  <div className="score-delete-row">
+                    <button
+                      className="score-delete-button"
+                      disabled={loading || deleting}
+                      onClick={() => requestDelete(s)}
+                      aria-label={"删除曲谱：" + s.title}
+                    >
+                      <Trash2 size={14} />
+                      删除曲谱
+                    </button>
+                  </div>
                   <div className="score-meta">
                     <span>
                       {s.status === "practicing" ? (
@@ -756,6 +897,44 @@ export default function GuitarRoom({
           setView("library");
         }}
       />
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除「{deleteTarget?.title}」？</AlertDialogTitle>
+            <AlertDialogDescription>
+              这份曲谱的原文件、批注、练习笔记和编排将一并删除，无法撤销。
+              {deleteTarget &&
+              (arrangementDrafts[deleteTarget.id] ||
+                recognitionDrafts[deleteTarget.id])
+                ? "未保存的编排和识别草稿也会删除。"
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && (
+            <p className="form-error" role="alert">
+              {deleteError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>保留曲谱</AlertDialogCancel>
+            <AlertDialogAction
+              className="delete-confirm-button"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void removeScore();
+              }}
+            >
+              {deleting ? "正在删除…" : "确认删除曲谱"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Toaster position="bottom-right" richColors closeButton />
     </SidebarProvider>
   );

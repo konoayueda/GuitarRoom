@@ -8,7 +8,9 @@ export async function GET(
     const user = await owner();
     const { id } = await params;
     const f = await db()
-      .prepare("SELECT object_key,name,type FROM files WHERE owner=? AND id=?")
+      .prepare(
+        "SELECT f.object_key,f.name,f.type FROM files f JOIN scores s ON s.owner=f.owner AND s.id=f.score_id WHERE f.owner=? AND f.id=? AND json_extract(s.body,'$.deletedAt') IS NULL",
+      )
       .bind(user, id)
       .first<{ object_key: string; name: string; type: string }>();
     if (!f) throw new ApiError(404, "找不到文件。");

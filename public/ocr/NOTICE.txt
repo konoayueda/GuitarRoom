@@ -1,0 +1,5 @@
+Tesseract.js 7.0.0 and Tesseract.js-core 7.0.0: Apache License 2.0.
+English traineddata: @tesseract.js-data/eng 1.0.0, 4.0.0_best_int; Apache License 2.0 (naptha/tessdata).
+Upstream: https://github.com/naptha/tesseract.js
+Language data: https://github.com/naptha/tessdata
+All recognition assets are served from this application; no score images are uploaded for recognition.

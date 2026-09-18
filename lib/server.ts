@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { headers } from "next/headers";
 import { z } from "zod";
+import { arrangementSchema } from "./arrangement";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -10,9 +11,17 @@ export class ApiError extends Error {
   }
 }
 export async function owner() {
-  const user = await getChatGPTUser();
-  if (!user) throw new ApiError(401, "请先登录，再保存你的曲谱。");
-  return user.userId;
+  // Login-free access is limited to this local development room. A production
+  // build must never expose the existing private library as a shared account.
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("host") ?? "";
+  if (
+    process.env.NODE_ENV !== "development" ||
+    !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host)
+  )
+    throw new ApiError(403, "当前为免登录的本机琴房，请在本机开发服务中打开。");
+  // Reuse the previous local namespace; no records or files need moving.
+  return "local_seedy";
 }
 export function db() {
   if (!env.DB) throw new ApiError(503, "曲谱库暂时无法连接，请稍后重试。");
@@ -79,6 +88,7 @@ export const patchSchema = metadataSchema
   .partial()
   .extend({
     expectedUpdatedAt: z.number().int().min(0),
+    arrangement: arrangementSchema.optional(),
     pages: z
       .array(
         z.object({

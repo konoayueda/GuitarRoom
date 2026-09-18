@@ -8,7 +8,17 @@ import {
   noCache,
   metadataSchema,
 } from "@/lib/server";
-import { DEMOS, type Score, type ScorePage } from "@/lib/models";
+import {
+  DEMOS,
+  normalizeScore,
+  type Score,
+  type ScorePage,
+} from "@/lib/models";
+import {
+  isDeletedScore,
+  retryDeletedFiles,
+  type DeletedScore,
+} from "@/lib/score-storage";
 export const dynamic = "force-dynamic";
 export async function GET() {
   return safe(async () => {
@@ -19,7 +29,19 @@ export async function GET() {
       )
       .bind(user)
       .all<{ body: string }>();
-    return noCache(result.results.map((r) => JSON.parse(r.body)));
+    const records = result.results.map(
+      (r) => JSON.parse(r.body) as Score | DeletedScore,
+    );
+    await retryDeletedFiles(user);
+    return noCache({
+      scores: records
+        .filter((s): s is Score => !isDeletedScore(s))
+        .map(normalizeScore),
+      dismissedDemoIds: records
+        .filter(isDeletedScore)
+        .filter((s) => s.demoId !== undefined)
+        .map((s) => s.id),
+    });
   });
 }
 export async function POST(req: Request) {
@@ -45,7 +67,10 @@ export async function POST(req: Request) {
         .prepare("SELECT body FROM scores WHERE owner=? AND id=?")
         .bind(user, score.id)
         .first<{ body: string }>();
-      return noCache(JSON.parse(row!.body));
+      const saved = JSON.parse(row!.body) as Score | DeletedScore;
+      if (isDeletedScore(saved))
+        throw new ApiError(410, "这份示范谱已从你的曲谱库删除。");
+      return noCache(normalizeScore(saved));
     }
     if (Number(req.headers.get("content-length") || 0) > 42 * 1024 * 1024)
       throw new ApiError(413, "一次导入请控制在 40 MB 以内。");
@@ -86,7 +111,10 @@ export async function POST(req: Request) {
         tags: true,
       })
       .parse(JSON.parse(String(form.get("metadata") || "{}")));
-    const pdfCount = Number(form.get("pdfPages") || 1);
+    const pdfCount =
+      inputFiles[0].type === "application/pdf"
+        ? Number(form.get("pdfPages"))
+        : 1;
     if (!Number.isInteger(pdfCount) || pdfCount < 1 || pdfCount > 200)
       throw new ApiError(400, "每份曲谱最多 200 页。");
     const scoreId = crypto.randomUUID();

@@ -9,6 +9,7 @@ export function useMetronome() {
     [running, setRunning] = useState(false),
     [beat, setBeat] = useState(-1),
     [beats, setBeats] = useState(4);
+  const generation = useRef(0);
   const tempo = useRef(bpm),
     meter = useRef(beats);
   useEffect(() => {
@@ -58,7 +59,14 @@ export function useMetronome() {
       gain.disconnect();
     };
   }, [running]);
+  useEffect(
+    () => () => {
+      generation.current++;
+    },
+    [],
+  );
   async function toggle() {
+    const run = ++generation.current;
     setBeat(-1);
     if (running) {
       setRunning(false);
@@ -66,12 +74,26 @@ export function useMetronome() {
     }
     try {
       await audioContext().resume();
+      if (run !== generation.current) return;
       setRunning(true);
     } catch {
       toast.error("无法启动声音，请检查浏览器声音设置。");
     }
   }
-  return { bpm, setBpm, running, beat, beats, setBeats, toggle };
+  return {
+    bpm,
+    setBpm,
+    running,
+    beat,
+    beats,
+    setBeats,
+    toggle,
+    stop: () => {
+      generation.current++;
+      setRunning(false);
+      setBeat(-1);
+    },
+  };
 }
 export function MetronomeControls({
   compact = false,
