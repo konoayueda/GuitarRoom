@@ -22,8 +22,6 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
-  Undo2,
-  Redo2,
   FileText,
   Download,
   X,
@@ -33,6 +31,17 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import ScoreNoteTools from "./score-note-tools";
+import { rhythmShape } from "@/lib/notation";
+import {
+  cursorAt,
+  cursorTick,
+  scoreSpan,
+  clearPassage,
+  copyPassage,
+  pastePassage,
+  type ScorePassage,
+} from "@/lib/score-editing";
 import ChordVoicing from "./chord-voicing-editor";
 import { CHORDS } from "@/lib/chords";
 import {
@@ -43,7 +52,6 @@ import {
   buildPlayback,
   durationOptions,
   GRID_OPTIONS,
-  barGridPoints,
   beatLabel,
   writtenNotes,
   noteCapacity,
@@ -105,6 +113,13 @@ export default function ArrangementEditor({
 }) {
   const value = draft ?? score.arrangement ?? EMPTY_ARRANGEMENT;
   const [grid, setGrid] = useState("12");
+  const [inputDuration, setInputDuration] = useState(12);
+  const [anchor, setAnchor] = useState<ScoreSelection | null>(null);
+  const [rangeMode, setRangeMode] = useState(false);
+  const [clipboard, setClipboard] = useState<ScorePassage | null>(null);
+  const [properties, setProperties] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [settings, setSettings] = useState(false);
   const [selected, setSelected] = useState<ScoreSelection>({
     barId: "",
     eventId: "",
@@ -122,6 +137,27 @@ export default function ArrangementEditor({
     issues = arrangementProblems(value);
   const chosen = bars.find((b) => b.bar.id === selected.barId);
   const event = chosen?.bar.events.find((e) => e.id === selected.eventId);
+  const currentTick = cursorTick(value, selected);
+  const currentNote =
+    event && selected.tick !== undefined
+      ? eventAttacks(event, value.pattern).find(
+          (n) =>
+            n.offsetTick === selected.tick &&
+            n.stringIndex === selected.stringIndex,
+        )
+      : undefined;
+  const currentDuration = currentNote?.durationTicks ?? inputDuration;
+  const selectionSpan = scoreSpan(value, selected, anchor, currentDuration);
+  const allWritten = writtenNotes(value);
+  const selectedWritten = allWritten.find(
+    (n) =>
+      n.eventId === selected.eventId &&
+      n.offsetTick === selected.tick &&
+      n.stringIndex === selected.stringIndex,
+  );
+  const tieTarget = selectedWritten
+    ? tieCandidate(allWritten, selectedWritten)
+    : undefined;
   const range =
     scope === "range" && bars.length
       ? {
@@ -176,7 +212,11 @@ export default function ArrangementEditor({
   function undo() {
     if (locked || !history.length) return;
     const old = history.at(-1)!;
-    setSelected({ barId: "", eventId: "" });
+    const cursor = cursorAt(old, currentTick ?? 0, selected.stringIndex);
+    setSelected(cursor ?? { barId: "", eventId: "" });
+    setAnchor(null);
+    setRangeMode(false);
+    restoreFocus(cursor);
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
     setHistory((h) => h.slice(0, -1));
@@ -191,7 +231,11 @@ export default function ArrangementEditor({
   function redo() {
     if (locked || !future.length) return;
     const next = future.at(-1)!;
-    setSelected({ barId: "", eventId: "" });
+    const cursor = cursorAt(next, currentTick ?? 0, selected.stringIndex);
+    setSelected(cursor ?? { barId: "", eventId: "" });
+    setAnchor(null);
+    setRangeMode(false);
+    restoreFocus(cursor);
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
     setHistory((h) => [...h, value]);
@@ -228,30 +272,241 @@ export default function ArrangementEditor({
         ),
       }));
   }
-  function select(selection: ScoreSelection) {
-    if (locked) return;
-    digits.current = { cell: "", time: 0, value: "", changed: false };
-    setSelected(selection);
-    requestAnimationFrame(() =>
-      document
-        .querySelector(".score-inline-editor")
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
-    );
-  }
   function focusCell(selection: ScoreSelection) {
     setSelected(selection);
-    const bar = bars.find((b) => b.bar.id === selection.barId)?.bar;
-    if (!bar) return;
-    let tick = selection.tick ?? 0;
-    for (const e of bar.events) {
-      if (e.id === selection.eventId) break;
-      tick += e.durationTicks;
+    requestAnimationFrame(() => {
+      const bar = bars.find((b) => b.bar.id === selection.barId)?.bar;
+      if (!bar) return;
+      let tick = selection.tick ?? 0;
+      for (const e of bar.events) {
+        if (e.id === selection.eventId) break;
+        tick += e.durationTicks;
+      }
+      const cell = document.querySelector<SVGGElement>(
+        '[data-note-cell="' +
+          CSS.escape(
+            selection.barId + ":" + tick + ":" + selection.stringIndex,
+          ) +
+          '"]',
+      );
+      cell?.focus({ preventScroll: true });
+      cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }
+  function restoreFocus(selection = selected) {
+    if (selection.tick !== undefined)
+      document
+        .querySelector<SVGGElement>(".editable-score .score-note-cell.picked")
+        ?.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      const cell = document.querySelector<SVGGElement>(
+        ".editable-score .score-note-cell.picked",
+      );
+      if (selection.tick !== undefined) cell?.focus({ preventScroll: true });
+    });
+  }
+  function select(selection: ScoreSelection, extend = false) {
+    if (locked) return;
+    digits.current = { cell: "", time: 0, value: "", changed: false };
+    if (extend || rangeMode) {
+      if (!anchor && selected.tick !== undefined) setAnchor(selected);
+    } else setAnchor(null);
+    setSelected(selection);
+    const ev = bars
+      .find((b) => b.bar.id === selection.barId)
+      ?.bar.events.find((e) => e.id === selection.eventId);
+    const n =
+      ev &&
+      eventAttacks(ev, value.pattern).find(
+        (n) =>
+          n.offsetTick === selection.tick &&
+          n.stringIndex === selection.stringIndex,
+      );
+    if (n) setInputDuration(n.durationTicks);
+    if (selection.tick === undefined) setProperties(true);
+  }
+  function moveCursor(direction: number, extend = false) {
+    if (locked || currentTick === undefined) return;
+    digits.current = { cell: "", time: 0, value: "", changed: false };
+    let next: number;
+    if (direction > 0) {
+      const candidate = currentTick + currentDuration;
+      const onset = allWritten.find(
+        (n) => n.startTick > currentTick && n.startTick < candidate,
+      )?.startTick;
+      next = onset ?? candidate;
+    } else {
+      const previous = allWritten
+        .filter((n) => n.startTick < currentTick)
+        .at(-1)?.startTick;
+      next = Math.max(
+        0,
+        previous !== undefined && previous >= currentTick - inputDuration
+          ? previous
+          : currentTick - inputDuration,
+      );
     }
-    document
-      .querySelector<SVGGElement>(
-        `[data-note-cell="${CSS.escape(selection.barId + ":" + tick + ":" + selection.stringIndex)}"]`,
+    const cursor = cursorAt(value, next, selected.stringIndex);
+    if (!cursor) return;
+    select(cursor, extend);
+    focusCell(cursor);
+  }
+  function applyDuration(ticks: number) {
+    if (locked || !Number.isInteger(ticks) || ticks < 2 || ticks > 96) return;
+    const targets =
+      anchor && selectionSpan
+        ? allWritten.filter(
+            (n) =>
+              n.startTick >= selectionSpan.start &&
+              n.startTick < selectionSpan.end,
+          )
+        : selectedWritten
+          ? [selectedWritten]
+          : [];
+    if (targets.some((n) => ticks > noteCapacity(allWritten, n))) {
+      toast.error(
+        "这个时值会覆盖同弦后音或越过小节线，请先留出空拍，跨小节使用延音连接。",
+      );
+      restoreFocus();
+      return;
+    }
+    setInputDuration(ticks);
+    if (targets.length) {
+      const keys = new Set(
+        targets.map(
+          (n) => n.eventId + ":" + n.offsetTick + ":" + n.stringIndex,
+        ),
+      );
+      change({
+        ...value,
+        sections: value.sections.map((section) => ({
+          ...section,
+          bars: section.bars.map((bar) => ({
+            ...bar,
+            events: bar.events.map((e) =>
+              targets.some((n) => n.eventId === e.id)
+                ? {
+                    ...e,
+                    notes: materializeNotes(e, value.pattern).map((n) =>
+                      keys.has(e.id + ":" + n.offsetTick + ":" + n.stringIndex)
+                        ? {
+                            ...n,
+                            durationTicks: ticks,
+                            sustainTicks: undefined,
+                            tieToNext: false,
+                          }
+                        : n,
+                    ),
+                  }
+                : e,
+            ),
+          })),
+        })),
+      });
+    }
+    restoreFocus();
+  }
+  function toggleTie() {
+    if (!selectedWritten || locked) return;
+    editEvent({
+      notes: materializeNotes(event!, value.pattern).map((n) =>
+        n.offsetTick === selected.tick && n.stringIndex === selected.stringIndex
+          ? {
+              ...n,
+              ...(n.tieToNext
+                ? { tieToNext: false }
+                : tieTarget
+                  ? {
+                      durationTicks:
+                        tieTarget.startTick - selectedWritten.startTick,
+                      tieToNext: true,
+                    }
+                  : {}),
+            }
+          : n,
+      ),
+    });
+    restoreFocus();
+  }
+  function rest() {
+    if (locked || currentTick === undefined) return;
+    const span =
+      anchor && selectionSpan
+        ? selectionSpan
+        : {
+            start: currentTick,
+            end: Math.min(bars.length * limit, currentTick + currentDuration),
+          };
+    change(clearPassage(value, span));
+    setAnchor(null);
+    setRangeMode(false);
+    restoreFocus();
+  }
+  function copy(cut = false) {
+    if (locked || !selectionSpan) return;
+    setClipboard(copyPassage(value, selectionSpan));
+    if (cut) change(clearPassage(value, selectionSpan));
+    toast.success(cut ? "已剪切片段" : "已复制片段", {
+      description: "包含和弦与休止；粘贴将覆盖光标后的相同时长。",
+    });
+    restoreFocus();
+  }
+  function paste() {
+    if (locked || currentTick === undefined || !clipboard) return;
+    try {
+      const next = pastePassage(value, currentTick, clipboard);
+      change(next);
+      setAnchor(null);
+      setRangeMode(false);
+      const cursor = cursorAt(next, currentTick, selected.stringIndex);
+      if (cursor) {
+        setSelected(cursor);
+        restoreFocus(cursor);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  function editorKey(e: KeyboardEvent<HTMLElement | SVGGElement>): boolean {
+    const target = e.target as Element;
+    if (
+      target.closest(
+        'input,textarea,select,[contenteditable="true"],[role="combobox"]',
       )
-      ?.focus();
+    )
+      return false;
+    const cmd = e.ctrlKey || e.metaKey,
+      key = e.key.toLowerCase();
+    if (cmd && key === "s") {
+      e.preventDefault();
+      if (draft && !invalid && !locked) void save();
+      return true;
+    }
+    if (cmd && key === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+      return true;
+    }
+    if (cmd && key === "y") {
+      e.preventDefault();
+      redo();
+      return true;
+    }
+    if (!target.closest(".score-note-cell")) return false;
+    if (cmd && ["c", "x", "v"].includes(key)) {
+      e.preventDefault();
+      if (key === "v") paste();
+      else copy(key === "x");
+      return true;
+    }
+    if (e.key === " ") {
+      e.preventDefault();
+      if (player.playing) player.stop();
+      else if (!invalid && !saving && bars.length) void play();
+      return true;
+    }
+    return false;
   }
   function putNote(
     selection: ScoreSelection,
@@ -295,7 +550,7 @@ export default function ArrangementEditor({
                 selection.tick!,
                 selection.stringIndex!,
                 fret,
-                Number(grid),
+                inputDuration,
                 marker,
               )
             : e,
@@ -317,7 +572,36 @@ export default function ArrangementEditor({
     putNote(selection, fret, false, "cross");
   }
   function noteKey(e: KeyboardEvent<SVGGElement>, selection: ScoreSelection) {
-    if (locked) return;
+    if (editorKey(e)) return;
+    if (locked || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (["+", "=", "-", "_", ".", "/", "r", "R", "l", "L"].includes(e.key)) {
+      e.preventDefault();
+      const shape = rhythmShape(currentDuration),
+        base = shape?.base ?? 12;
+      if (e.key.toLowerCase() === "r") rest();
+      else if (e.key.toLowerCase() === "l") toggleTie();
+      else if (e.key === ".")
+        applyDuration(
+          base * (shape?.dots === 0 ? 1.5 : shape?.dots === 1 ? 1.75 : 1),
+        );
+      else if (e.key === "/")
+        applyDuration(shape?.triplet ? base : (base * 2) / 3);
+      else
+        applyDuration(currentDuration * (["+", "="].includes(e.key) ? 0.5 : 2));
+      return;
+    }
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const t =
+        Math.floor(currentTick! / limit) * limit +
+        (e.key === "End" ? Math.max(0, limit - inputDuration) : 0);
+      const cursor = cursorAt(value, t, selection.stringIndex);
+      if (cursor) {
+        select(cursor, e.shiftKey);
+        focusCell(cursor);
+      }
+      return;
+    }
     if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       const cell = JSON.stringify(selection),
@@ -346,10 +630,15 @@ export default function ArrangementEditor({
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       digits.current = { cell: "", time: 0, value: "", changed: false };
-      putNote(selection, null);
+      if (anchor && selectionSpan) {
+        change(clearPassage(value, selectionSpan));
+        setAnchor(null);
+        setRangeMode(false);
+      } else putNote(selection, null);
     } else if (e.key === "Escape") {
       e.preventDefault();
-      setSelected({ barId: "", eventId: "" });
+      setAnchor(null);
+      setRangeMode(false);
     } else if (e.key.startsWith("Arrow")) {
       e.preventDefault();
       digits.current = { cell: "", time: 0, value: "", changed: false };
@@ -366,47 +655,7 @@ export default function ArrangementEditor({
         });
         return;
       }
-      let index = bars.findIndex((b) => b.bar.id === selection.barId),
-        tick = selection.tick ?? 0;
-      for (const item of bars[index].bar.events) {
-        if (item.id === selection.eventId) break;
-        tick += item.durationTicks;
-      }
-      const points = barGridPoints(
-        bars[index].bar,
-        Number(grid),
-        limit,
-        value.pattern,
-      ).filter((t) => t < limit);
-      const right = e.key === "ArrowRight";
-      const next = right
-        ? points.find((t) => t > tick)
-        : points.findLast((t) => t < tick);
-      if (next !== undefined) tick = next;
-      else {
-        index += right ? 1 : -1;
-        if (index < 0 || index >= bars.length) return;
-        const adjacent = barGridPoints(
-          bars[index].bar,
-          Number(grid),
-          limit,
-          value.pattern,
-        ).filter((t) => t < limit);
-        tick = right ? adjacent[0] : adjacent.at(-1)!;
-      }
-      if (index < 0 || index >= bars.length) return;
-      for (const item of bars[index].bar.events) {
-        if (tick < item.durationTicks) {
-          focusCell({
-            ...selection,
-            barId: bars[index].bar.id,
-            eventId: item.id,
-            tick,
-          });
-          return;
-        }
-        tick -= item.durationTicks;
-      }
+      moveCursor(e.key === "ArrowRight" ? 1 : -1, e.shiftKey);
     }
   }
   function addSection() {
@@ -526,6 +775,7 @@ export default function ArrangementEditor({
     function rhythm(
       patch: Partial<NonNullable<ArrangementEvent["notes"]>[number]>,
     ) {
+      if (patch.durationTicks) setInputDuration(patch.durationTicks);
       editEvent({
         notes: materializeNotes(event!, value.pattern).map((n) =>
           n.offsetTick === selected.tick &&
@@ -620,7 +870,11 @@ export default function ArrangementEditor({
                       note.durationTicks,
                     )}
                     onChange={(v) =>
-                      rhythm({ durationTicks: Number(v), tieToNext: false })
+                      rhythm({
+                        durationTicks: Number(v),
+                        sustainTicks: undefined,
+                        tieToNext: false,
+                      })
                     }
                   />
                 </label>
@@ -862,123 +1116,237 @@ export default function ArrangementEditor({
     );
   }
   return (
-    <div className="arrangement-editor direct-arrangement">
-      <div className="score-editor-toolbar">
-        <div className="score-editor-title">
-          <Music2 size={18} />
-          <strong>谱面编排</strong>
-          <span className="arrangement-save-state" role="status">
-            {saving ? (
-              "保存中…"
-            ) : draft ? (
-              "未保存"
-            ) : score.arrangement ? (
-              <>
-                <Check size={13} />
-                已保存
-              </>
-            ) : (
-              "新编排"
-            )}
-          </span>
+    <div
+      className="arrangement-editor direct-arrangement gp-arrangement"
+      onKeyDown={editorKey}
+    >
+      <div className="gp-editor-header">
+        <div className="score-editor-toolbar">
+          <div className="score-editor-title">
+            <Music2 size={18} />
+            <strong>谱面编排</strong>
+            <span className="arrangement-save-state" role="status">
+              {saving ? (
+                "保存中…"
+              ) : draft ? (
+                "未保存"
+              ) : score.arrangement ? (
+                <>
+                  <Check size={13} />
+                  已保存
+                </>
+              ) : (
+                "新编排"
+              )}
+            </span>
+          </div>
+          <div className="score-editor-commands">
+            <button className="button secondary-button" onClick={onRead}>
+              <FileText size={15} />
+              阅读编排
+            </button>
+            <button
+              className="button secondary-button"
+              aria-expanded={settings}
+              onClick={() => setSettings((v) => !v)}
+            >
+              谱面设置
+            </button>
+            <button
+              className="button primary"
+              disabled={!draft || invalid || locked}
+              onClick={save}
+            >
+              <Save size={14} />
+              {saving ? "保存中…" : "保存编排"}
+            </button>
+          </div>
         </div>
-        <div className="score-editor-commands">
-          <button className="button secondary-button" onClick={onRead}>
-            <FileText size={15} />
-            阅读编排
-          </button>
-          <button
-            className="button secondary-button"
-            disabled={locked}
-            onClick={onRecognize}
-          >
+        <fieldset
+          disabled={locked}
+          hidden={!settings}
+          className="score-global-settings"
+        >
+          <label>
+            速度
+            <span>
+              ♩ ={" "}
+              <input
+                type="number"
+                aria-label="编排速度"
+                min={30}
+                max={240}
+                value={value.bpm}
+                onChange={(e) =>
+                  change({ ...value, bpm: Number(e.target.value) })
+                }
+              />
+            </span>
+          </label>
+          <label>
+            拍号
+            <Choice
+              label="编排拍号"
+              value={value.meter}
+              onChange={(v) =>
+                change({ ...value, meter: v as Arrangement["meter"] })
+              }
+              options={["4/4", "3/4", "6/8"].map((v) => ({
+                value: v,
+                label: v,
+              }))}
+            />
+          </label>
+          <label>
+            默认奏法
+            <Choice
+              label="试听音型"
+              value={value.pattern}
+              onChange={(v) =>
+                change({ ...value, pattern: v as Arrangement["pattern"] })
+              }
+              options={[
+                { value: "strum", label: "和弦扫奏" },
+                { value: "arpeggio", label: "八分分解" },
+              ]}
+            />
+          </label>
+          <label>
+            显示网格
+            <Choice
+              label="音符输入网格"
+              value={grid}
+              options={GRID_OPTIONS}
+              onChange={(v) => {
+                setGrid(v);
+              }}
+            />
+          </label>
+          <span className="score-capo">Capo {score.capo} · 标准调弦</span>
+          <button className="button secondary-button" onClick={onRecognize}>
             <ScanLine size={15} />
             从原谱识别
           </button>
-          <button
-            className="icon-button"
-            title="撤销"
-            aria-label="撤销编排修改"
-            disabled={!history.length || locked}
-            onClick={undo}
-          >
-            <Undo2 size={17} />
-          </button>
-          <button
-            className="icon-button"
-            title="重做"
-            aria-label="重做编排修改"
-            disabled={!future.length || locked}
-            onClick={redo}
-          >
-            <Redo2 size={17} />
-          </button>
-          <button
-            className="button primary"
-            disabled={!draft || invalid || locked}
-            onClick={save}
-          >
-            <Save size={14} />
-            {saving ? "保存中…" : "保存编排"}
-          </button>
-        </div>
+        </fieldset>
+        <ScoreNoteTools
+          duration={currentDuration}
+          onDuration={applyDuration}
+          locked={locked}
+          onRest={rest}
+          onTie={toggleTie}
+          tied={!!currentNote?.tieToNext}
+          canTie={!!currentNote?.tieToNext || !!tieTarget}
+          onCopy={() => copy()}
+          onCut={() => copy(true)}
+          onPaste={paste}
+          canCopy={currentTick !== undefined}
+          canPaste={!!clipboard && currentTick !== undefined}
+          onAnchor={() => {
+            if (anchor) {
+              setAnchor(null);
+              setRangeMode(false);
+            } else {
+              setAnchor(selected);
+              setRangeMode(true);
+            }
+            restoreFocus();
+          }}
+          selecting={!!anchor}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={!!history.length}
+          canRedo={!!future.length}
+          onMove={(direction) => moveCursor(direction, rangeMode)}
+          onProperties={() => setProperties((v) => !v)}
+          properties={properties}
+          location={
+            chosen
+              ? "第 " +
+                chosen.number +
+                " 小节" +
+                (currentTick !== undefined
+                  ? " · " +
+                    beatLabel(currentTick % limit) +
+                    " · " +
+                    (6 - selected.stringIndex!) +
+                    " 弦"
+                  : " · 和弦") +
+                (anchor && selectionSpan
+                  ? " · 已选 " +
+                    ((selectionSpan.end - selectionSpan.start) / 24)
+                      .toFixed(2)
+                      .replace(/\.?0+$/, "") +
+                    " 拍"
+                  : "")
+              : "点击谱面定位，选择时值后输入品位"
+          }
+          onHelp={() => setHelp((v) => !v)}
+          help={help}
+        />
+        {currentTick !== undefined && (
+          <div className="gp-fret-entry">
+            <select
+              aria-label="输入弦位"
+              value={selected.stringIndex}
+              disabled={locked}
+              onChange={(e) => {
+                const cursor = {
+                  ...selected,
+                  stringIndex: Number(e.target.value),
+                };
+                select(cursor);
+                focusCell(cursor);
+              }}
+            >
+              {[5, 4, 3, 2, 1, 0].map((n) => (
+                <option key={n} value={n}>
+                  {6 - n} 弦
+                </option>
+              ))}
+            </select>
+            <label>
+              品位
+              <input
+                aria-label="谱面品位输入"
+                inputMode="numeric"
+                value={
+                  currentNote?.marker === "cross"
+                    ? "×"
+                    : (currentNote?.fret ?? "")
+                }
+                placeholder="空位"
+                disabled={locked}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  if (/^[xX×]$/.test(text)) putChordNote(selected);
+                  else if (text === "") putNote(selected, null);
+                  else if (/^\d{1,2}$/.test(text) && Number(text) <= 24)
+                    putNote(selected, Number(text));
+                }}
+              />
+            </label>
+            <button
+              disabled={locked}
+              onClick={() => {
+                putChordNote(selected);
+                restoreFocus();
+              }}
+            >
+              × 按和弦
+            </button>
+            <button
+              disabled={locked || !currentNote}
+              onClick={() => {
+                putNote(selected, null);
+                restoreFocus();
+              }}
+            >
+              清除单音
+            </button>
+            <span>上下换弦写和音，左右移动到下一拍</span>
+          </div>
+        )}
       </div>
-      <fieldset disabled={locked} className="score-global-settings">
-        <label>
-          速度
-          <span>
-            ♩ ={" "}
-            <input
-              type="number"
-              aria-label="编排速度"
-              min={30}
-              max={240}
-              value={value.bpm}
-              onChange={(e) =>
-                change({ ...value, bpm: Number(e.target.value) })
-              }
-            />
-          </span>
-        </label>
-        <label>
-          拍号
-          <Choice
-            label="编排拍号"
-            value={value.meter}
-            onChange={(v) =>
-              change({ ...value, meter: v as Arrangement["meter"] })
-            }
-            options={["4/4", "3/4", "6/8"].map((v) => ({ value: v, label: v }))}
-          />
-        </label>
-        <label>
-          默认奏法
-          <Choice
-            label="试听音型"
-            value={value.pattern}
-            onChange={(v) =>
-              change({ ...value, pattern: v as Arrangement["pattern"] })
-            }
-            options={[
-              { value: "strum", label: "和弦扫奏" },
-              { value: "arpeggio", label: "八分分解" },
-            ]}
-          />
-        </label>
-        <label>
-          输入网格
-          <Choice
-            label="音符输入网格"
-            value={grid}
-            options={GRID_OPTIONS}
-            onChange={(v) => {
-              setGrid(v);
-              setSelected({ barId: "", eventId: "" });
-            }}
-          />
-        </label>
-        <span className="score-capo">Capo {score.capo} · 标准调弦</span>
-      </fieldset>
       {!bars.length ? (
         <div className="arrangement-empty">
           <Music2 size={28} />
@@ -1006,184 +1374,217 @@ export default function ArrangementEditor({
           <small>图片与 PDF 可在「原谱阅读」中对照。</small>
         </div>
       ) : (
-        <>
-          <ArrangementPreview
-            arrangement={value}
-            title={score.title}
-            capo={score.capo}
-            position={player.position}
-            editing={{
-              gridStep: Number(grid),
-              selected,
-              locked,
-              onSelect: select,
-              onKey: noteKey,
-              inspector,
-              sectionHeading: (id, si) => {
-                const section = value.sections[si];
-                return (
-                  <fieldset disabled={locked} className="score-section-heading">
-                    <span className="section-letter">
-                      {String.fromCharCode(65 + si)}
-                    </span>
-                    <input
-                      aria-label={`段落 ${si + 1} 名称`}
-                      maxLength={30}
-                      value={section.label}
-                      onChange={(e) =>
-                        change({
-                          ...value,
-                          sections: value.sections.map((s) =>
-                            s.id === id ? { ...s, label: e.target.value } : s,
-                          ),
-                        })
-                      }
-                    />
-                    <Choice
-                      label={`段落 ${si + 1} 播放遍数`}
-                      value={String(section.repeat)}
-                      onChange={(v) =>
-                        change({
-                          ...value,
-                          sections: value.sections.map((s) =>
-                            s.id === id ? { ...s, repeat: Number(v) } : s,
-                          ),
-                        })
-                      }
-                      options={Array.from({ length: 8 }, (_, i) => ({
-                        value: String(i + 1),
-                        label: `播放 ${i + 1} 遍`,
-                      }))}
-                    />
-                    <div className="score-section-actions">
-                      <button
-                        className="icon-button"
-                        disabled={si === 0}
-                        aria-label={`上移段落 ${si + 1}`}
-                        onClick={() => {
-                          const next = [...value.sections];
-                          [next[si - 1], next[si]] = [next[si], next[si - 1]];
-                          change({ ...value, sections: next });
-                        }}
-                      >
-                        <ArrowUp size={14} />
-                      </button>
-                      <button
-                        className="icon-button"
-                        disabled={si === value.sections.length - 1}
-                        aria-label={`下移段落 ${si + 1}`}
-                        onClick={() => {
-                          const next = [...value.sections];
-                          [next[si], next[si + 1]] = [next[si + 1], next[si]];
-                          change({ ...value, sections: next });
-                        }}
-                      >
-                        <ArrowDown size={14} />
-                      </button>
-                      <button
-                        className="icon-button"
-                        aria-label={`删除段落 ${si + 1}`}
-                        onClick={() =>
+        <div
+          className={
+            "gp-score-workspace " + (properties ? "properties-open" : "")
+          }
+        >
+          <div className="gp-score-paper">
+            <ArrangementPreview
+              arrangement={value}
+              title={score.title}
+              capo={score.capo}
+              position={player.position}
+              editing={{
+                gridStep: Number(grid),
+                selected,
+                locked,
+                onSelect: select,
+                onKey: noteKey,
+                inspector: () => null,
+                range: anchor ? selectionSpan : undefined,
+                sectionHeading: (id, si) => {
+                  const section = value.sections[si];
+                  return (
+                    <fieldset
+                      disabled={locked}
+                      className="score-section-heading"
+                    >
+                      <span className="section-letter">
+                        {String.fromCharCode(65 + si)}
+                      </span>
+                      <input
+                        aria-label={`段落 ${si + 1} 名称`}
+                        maxLength={30}
+                        value={section.label}
+                        onChange={(e) =>
                           change({
                             ...value,
-                            sections: value.sections.filter((s) => s.id !== id),
+                            sections: value.sections.map((s) =>
+                              s.id === id ? { ...s, label: e.target.value } : s,
+                            ),
                           })
                         }
+                      />
+                      <Choice
+                        label={`段落 ${si + 1} 播放遍数`}
+                        value={String(section.repeat)}
+                        onChange={(v) =>
+                          change({
+                            ...value,
+                            sections: value.sections.map((s) =>
+                              s.id === id ? { ...s, repeat: Number(v) } : s,
+                            ),
+                          })
+                        }
+                        options={Array.from({ length: 8 }, (_, i) => ({
+                          value: String(i + 1),
+                          label: `播放 ${i + 1} 遍`,
+                        }))}
+                      />
+                      <div className="score-section-actions">
+                        <button
+                          className="icon-button"
+                          disabled={si === 0}
+                          aria-label={`上移段落 ${si + 1}`}
+                          onClick={() => {
+                            const next = [...value.sections];
+                            [next[si - 1], next[si]] = [next[si], next[si - 1]];
+                            change({ ...value, sections: next });
+                          }}
+                        >
+                          <ArrowUp size={14} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          disabled={si === value.sections.length - 1}
+                          aria-label={`下移段落 ${si + 1}`}
+                          onClick={() => {
+                            const next = [...value.sections];
+                            [next[si], next[si + 1]] = [next[si + 1], next[si]];
+                            change({ ...value, sections: next });
+                          }}
+                        >
+                          <ArrowDown size={14} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          aria-label={`删除段落 ${si + 1}`}
+                          onClick={() =>
+                            change({
+                              ...value,
+                              sections: value.sections.filter(
+                                (s) => s.id !== id,
+                              ),
+                            })
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </fieldset>
+                  );
+                },
+                sectionEnd: (id) => {
+                  const section = value.sections.find((s) => s.id === id)!;
+                  return (
+                    <button
+                      className="score-add-bar"
+                      disabled={
+                        locked ||
+                        section.bars.length >= 32 ||
+                        bars.length >= 128
+                      }
+                      onClick={() =>
+                        barAction(section.bars.at(-1)!.id, "insert")
+                      }
+                    >
+                      <Plus size={18} />
+                      <span>添加小节</span>
+                    </button>
+                  );
+                },
+                barTools: (barId) => {
+                  const item = bars.find((b) => b.bar.id === barId)!;
+                  const index = item.section.bars.findIndex(
+                    (b) => b.id === barId,
+                  );
+                  return (
+                    <div className="score-bar-actions">
+                      <button
+                        title="前移小节"
+                        aria-label={`前移第 ${item.number} 小节`}
+                        disabled={locked || index === 0}
+                        onClick={() => barAction(barId, "left")}
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      <button
+                        title="后移小节"
+                        aria-label={`后移第 ${item.number} 小节`}
+                        disabled={
+                          locked || index === item.section.bars.length - 1
+                        }
+                        onClick={() => barAction(barId, "right")}
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                      <button
+                        title="在后面插入小节"
+                        aria-label={`在第 ${item.number} 小节后插入`}
+                        disabled={
+                          locked ||
+                          bars.length >= 128 ||
+                          item.section.bars.length >= 32
+                        }
+                        onClick={() => barAction(barId, "insert")}
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <button
+                        title="复制小节"
+                        aria-label={`复制第 ${item.number} 小节`}
+                        disabled={
+                          locked ||
+                          bars.length >= 128 ||
+                          item.section.bars.length >= 32
+                        }
+                        onClick={() => barAction(barId, "copy")}
+                      >
+                        <Copy size={14} />
+                      </button>
+                      <button
+                        title="删除小节"
+                        aria-label={`删除第 ${item.number} 小节`}
+                        disabled={locked}
+                        onClick={() => barAction(barId, "delete")}
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
-                  </fieldset>
-                );
-              },
-              sectionEnd: (id) => {
-                const section = value.sections.find((s) => s.id === id)!;
-                return (
-                  <button
-                    className="score-add-bar"
-                    disabled={
-                      locked || section.bars.length >= 32 || bars.length >= 128
-                    }
-                    onClick={() => barAction(section.bars.at(-1)!.id, "insert")}
-                  >
-                    <Plus size={18} />
-                    <span>添加小节</span>
-                  </button>
-                );
-              },
-              barTools: (barId) => {
-                const item = bars.find((b) => b.bar.id === barId)!;
-                const index = item.section.bars.findIndex(
-                  (b) => b.id === barId,
-                );
-                return (
-                  <div className="score-bar-actions">
-                    <button
-                      title="前移小节"
-                      aria-label={`前移第 ${item.number} 小节`}
-                      disabled={locked || index === 0}
-                      onClick={() => barAction(barId, "left")}
-                    >
-                      <ChevronLeft size={14} />
-                    </button>
-                    <button
-                      title="后移小节"
-                      aria-label={`后移第 ${item.number} 小节`}
-                      disabled={
-                        locked || index === item.section.bars.length - 1
-                      }
-                      onClick={() => barAction(barId, "right")}
-                    >
-                      <ChevronRight size={14} />
-                    </button>
-                    <button
-                      title="在后面插入小节"
-                      aria-label={`在第 ${item.number} 小节后插入`}
-                      disabled={
-                        locked ||
-                        bars.length >= 128 ||
-                        item.section.bars.length >= 32
-                      }
-                      onClick={() => barAction(barId, "insert")}
-                    >
-                      <Plus size={14} />
-                    </button>
-                    <button
-                      title="复制小节"
-                      aria-label={`复制第 ${item.number} 小节`}
-                      disabled={
-                        locked ||
-                        bars.length >= 128 ||
-                        item.section.bars.length >= 32
-                      }
-                      onClick={() => barAction(barId, "copy")}
-                    >
-                      <Copy size={14} />
-                    </button>
-                    <button
-                      title="删除小节"
-                      aria-label={`删除第 ${item.number} 小节`}
-                      disabled={locked}
-                      onClick={() => barAction(barId, "delete")}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                );
-              },
-            }}
-          />
-          <button
-            className="button secondary-button score-add-section"
-            disabled={
-              locked || value.sections.length >= 16 || bars.length >= 128
-            }
-            onClick={addSection}
-          >
-            <Plus size={15} />
-            添加段落
-          </button>
-        </>
+                  );
+                },
+              }}
+            />
+            <button
+              className="button secondary-button score-add-section"
+              disabled={
+                locked || value.sections.length >= 16 || bars.length >= 128
+              }
+              onClick={addSection}
+            >
+              <Plus size={15} />
+              添加段落
+            </button>
+          </div>
+          <aside className="gp-properties" aria-label="谱面属性">
+            <header>
+              <strong>谱面属性</strong>
+              <button
+                className="icon-button"
+                aria-label="关闭谱面属性"
+                onClick={() => setProperties(false)}
+              >
+                <X size={15} />
+              </button>
+            </header>
+            {chosen && event ? (
+              inspector(chosen.bar.id)
+            ) : (
+              <p>点击音符或小节上方的和弦，在这里查看按法与演奏细节。</p>
+            )}
+          </aside>
+        </div>
       )}
       <div className="arrangement-savebar">
         <button

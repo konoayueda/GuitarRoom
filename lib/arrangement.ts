@@ -52,6 +52,11 @@ const arrangementShape = z
                                       .min(1)
                                       .max(96)
                                       .optional(),
+                                    sustainTicks: z
+                                      .number()
+                                      .positive()
+                                      .max(96)
+                                      .optional(),
                                     tieToNext: z.boolean().optional(),
                                   })
                                   .strict(),
@@ -458,7 +463,8 @@ export function eventAttacks(
             .map((n) => n.offsetTick - note.offsetTick),
         ),
       gateTicks: Math.min(
-        note.durationTicks ??
+        note.sustainTicks ??
+          note.durationTicks ??
           (pattern === "strum"
             ? event.durationTicks - note.offsetTick
             : Math.min(21.6, event.durationTicks - note.offsetTick)),
@@ -661,6 +667,14 @@ export function repairNoteLinks(a: Arrangement): Arrangement {
                       ? { fret: written.fret }
                       : {}),
                     ...(duration ? { durationTicks: duration } : {}),
+                    ...(n.sustainTicks
+                      ? {
+                          sustainTicks: Math.min(
+                            n.sustainTicks,
+                            noteCapacity(notes, written),
+                          ),
+                        }
+                      : {}),
                     ...(n.tieToNext
                       ? {
                           tieToNext:
