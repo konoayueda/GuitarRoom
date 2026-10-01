@@ -12,19 +12,23 @@ export function Choice({
   options,
   label,
   className = "",
+  disabled = false,
+  onCloseAutoFocus,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   label: string;
   className?: string;
+  disabled?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger aria-label={label} className={"room-choice " + className}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onCloseAutoFocus={onCloseAutoFocus}>
         {options.map((o) => (
           <SelectItem value={o.value} key={o.value}>
             {o.label}

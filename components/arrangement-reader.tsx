@@ -38,6 +38,7 @@ export default function ArrangementReader({
   onPlay: () => void;
 }) {
   const value = draft ?? score.arrangement ?? EMPTY_ARRANGEMENT;
+  const [part, setPart] = useState<"both" | "guitar" | "vocal">("both");
   const [zoom, setZoom] = useState("100"),
     [loop, setLoop] = useState(false),
     [scrolling, setScrolling] = useState(false);
@@ -49,6 +50,7 @@ export default function ArrangementReader({
     undefined,
     loop,
     stopPlayback,
+    part,
   );
   const invalid =
     arrangementProblems(value).length > 0 ||
@@ -95,6 +97,16 @@ export default function ArrangementReader({
         </div>
         <div className="tool-group">
           <Choice
+            label="编排阅读试听声部"
+            value={part}
+            onChange={(v) => setPart(v as typeof part)}
+            options={[
+              { value: "both", label: "吉他 + 唱音" },
+              { value: "guitar", label: "吉他" },
+              { value: "vocal", label: "唱音旋律" },
+            ]}
+          />
+          <Choice
             label="编排阅读缩放"
             value={zoom}
             onChange={setZoom}
@@ -118,7 +130,7 @@ export default function ArrangementReader({
         {count ? (
           <div
             className="arrangement-reading-paper"
-            style={{ width: zoom + "%", maxWidth: (900 * Number(zoom)) / 100 }}
+            style={{ width: zoom + "%" }}
           >
             <ArrangementPreview
               arrangement={value}

@@ -17,6 +17,10 @@ const arrangementShape = z
     bpm: z.number().int().min(30).max(240),
     meter: z.enum(["4/4", "3/4", "6/8"]),
     pattern: z.enum(["strum", "arpeggio"]),
+    lyricLineCount: z.number().int().min(1).max(8).optional(),
+    vocalKey: z
+      .enum(["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"])
+      .optional(),
     sections: z
       .array(
         z
@@ -30,6 +34,45 @@ const arrangementShape = z
                   .object({
                     id,
                     pageId: id.optional(),
+                    lyrics: z
+                      .array(
+                        z
+                          .object({
+                            tick: z.number().int().min(0).max(95),
+                            verse: z.number().int().min(0).max(7),
+                            text: z.string().min(1).max(120),
+                            anchorMode: z.enum(["auto", "free"]).optional(),
+                            vocalNoteId: id.optional(),
+                            offsetX: z.number().min(-96).max(96).optional(),
+                            offsetY: z.number().min(-24).max(24).optional(),
+                            endVocalNoteId: id.optional(),
+                          })
+                          .strict(),
+                      )
+                      .max(768)
+                      .optional(),
+                    vocalNotes: z
+                      .array(
+                        z
+                          .object({
+                            id,
+                            tick: z.number().int().min(0).max(95),
+                            degree: z.number().int().min(0).max(7),
+                            octave: z.number().int().min(-2).max(2),
+                            accidental: z
+                              .union([
+                                z.literal(-1),
+                                z.literal(0),
+                                z.literal(1),
+                              ])
+                              .optional(),
+                            durationTicks: z.number().int().min(1).max(96),
+                            tieToNext: z.boolean().optional(),
+                          })
+                          .strict(),
+                      )
+                      .max(96)
+                      .optional(),
                     events: z
                       .array(
                         z
@@ -93,6 +136,17 @@ const arrangementV2Schema = arrangementShape.superRefine((a, ctx) => {
     for (const bar of section.bars) {
       count++;
       checkId(bar.id);
+      for (const note of bar.vocalNotes ?? []) checkId(note.id);
+      const lyricPositions = new Set<string>();
+      for (const lyric of bar.lyrics ?? []) {
+        const position = lyric.tick + ":" + lyric.verse;
+        if (lyric.tick >= barTicks(a.meter) || lyricPositions.has(position))
+          ctx.addIssue({
+            code: "custom",
+            message: "歌词位置超出小节或同一行同一拍点重复",
+          });
+        lyricPositions.add(position);
+      }
       for (const e of bar.events) {
         checkId(e.id);
         const coordinates = new Set<string>();
@@ -113,7 +167,11 @@ const arrangementV2Schema = arrangementShape.superRefine((a, ctx) => {
         ctx.addIssue({ code: "custom", message: "请补齐每个小节的时值" });
     }
   }
-  for (const problem of noteProblems(a))
+  for (const problem of [
+    ...noteProblems(a),
+    ...vocalProblems(a),
+    ...lyricProblems(a),
+  ])
     ctx.addIssue({ code: "custom", message: problem.message });
   if (count > 128)
     ctx.addIssue({ code: "custom", message: "一份编排最多128个小节" });
@@ -151,6 +209,10 @@ export function normalizeArrangement(value: unknown): Arrangement {
 export type ArrangementSection = Arrangement["sections"][number];
 export type ArrangementBar = ArrangementSection["bars"][number];
 export type ArrangementEvent = ArrangementBar["events"][number];
+export type ArrangementLyric = NonNullable<ArrangementBar["lyrics"]>[number];
+export type VocalNote = NonNullable<ArrangementBar["vocalNotes"]>[number];
+export type ArrangementVocalNote = VocalNote;
+export type VocalKey = NonNullable<Arrangement["vocalKey"]>;
 export const EMPTY_ARRANGEMENT: Arrangement = {
   version: 2,
   bpm: 72,
@@ -197,17 +259,21 @@ export const durationLabel = (ticks: number) =>
 export const rhythmSymbol = (ticks: number) =>
   RHYTHMS.find((r) => r.ticks === ticks)?.symbol ??
   Math.round((ticks / 24) * 100) / 100 + "拍";
-export const beatLabel = (tick: number) => {
-  const beat = Math.floor(tick / 24) + 1,
-    part = tick % 24;
+export const beatLabel = (
+  tick: number,
+  meter: Arrangement["meter"] = "4/4",
+) => {
+  const unit = meter === "6/8" ? 12 : 24;
+  const beat = Math.floor(tick / unit) + 1,
+    part = tick % unit;
   let divisor = part,
-    denominator = 24;
+    denominator = unit;
   while (denominator) {
     [divisor, denominator] = [denominator, divisor % denominator];
   }
   return part === 0
     ? "第 " + beat + " 拍"
-    : "第 " + beat + " 拍 + " + part / divisor + "/" + 24 / divisor;
+    : "第 " + beat + " 拍 + " + part / divisor + "/" + unit / divisor;
 };
 export function durationOptions(capacity: number, current?: number) {
   const values = RHYTHMS.filter((r) => r.ticks <= capacity).map((r) => ({
@@ -243,10 +309,51 @@ export function duplicateBar(
   pattern: Arrangement["pattern"] = "strum",
 ): ArrangementBar {
   const total = bar.events.reduce((n, e) => n + e.durationTicks, 0);
+  const vocalIds = new Map(
+    (bar.vocalNotes ?? []).map((note) => [note.id, crypto.randomUUID()]),
+  );
   let offset = 0;
   return {
     ...structuredClone(bar),
+    ...(bar.lyrics
+      ? {
+          lyrics: bar.lyrics.map((lyric) => {
+            const result = { ...lyric };
+            const source =
+              lyric.anchorMode !== "free"
+                ? (bar.vocalNotes ?? []).find(
+                    (note) =>
+                      note.degree !== 0 &&
+                      note.tick === lyric.tick &&
+                      (!lyric.vocalNoteId || note.id === lyric.vocalNoteId),
+                  )
+                : undefined;
+            if (source) result.vocalNoteId = vocalIds.get(source.id)!;
+            else if (lyric.vocalNoteId) {
+              result.anchorMode = "free";
+              delete result.vocalNoteId;
+            }
+            if (
+              lyric.endVocalNoteId &&
+              vocalIds.has(lyric.endVocalNoteId) &&
+              source
+            )
+              result.endVocalNoteId = vocalIds.get(lyric.endVocalNoteId)!;
+            else delete result.endVocalNoteId;
+            return result;
+          }),
+        }
+      : {}),
     id: crypto.randomUUID(),
+    ...(bar.vocalNotes
+      ? {
+          vocalNotes: bar.vocalNotes.map((n) => ({
+            ...n,
+            id: vocalIds.get(n.id)!,
+            ...(n.tick + n.durationTicks >= total ? { tieToNext: false } : {}),
+          })),
+        }
+      : {}),
     events: bar.events.map((e) => {
       const start = offset;
       offset += e.durationTicks;
@@ -321,6 +428,8 @@ export function arrangementProblems(a: Arrangement) {
         })),
     ),
     ...noteProblems(a),
+    ...vocalProblems(a),
+    ...lyricProblems(a),
     ...listBars(a).flatMap(({ bar, number }) => {
       const gap =
         barTicks(a.meter) - bar.events.reduce((n, e) => n + e.durationTicks, 0);
@@ -636,6 +745,7 @@ export function noteProblems(a: Arrangement) {
 }
 // Inserting, moving or deleting a note cuts overlapping durations and removes broken ties.
 export function repairNoteLinks(a: Arrangement): Arrangement {
+  a = repairLyricLinks(repairVocalLinks(a));
   const notes = writtenNotes(a),
     byKey = new Map(
       notes.map((n) => [
@@ -699,7 +809,15 @@ export function barGridPoints(
   limit: number,
   pattern: Arrangement["pattern"] = "strum",
 ) {
-  const points = new Set<number>([0, limit]);
+  const points = new Set<number>([
+    0,
+    limit,
+    ...(bar.lyrics ?? []).map((lyric) => lyric.tick),
+    ...(bar.vocalNotes ?? []).flatMap((note) => [
+      note.tick,
+      Math.min(limit, note.tick + note.durationTicks),
+    ]),
+  ]);
   for (let t = 0; t < limit; t += step) points.add(t);
   let offset = 0;
   for (const e of bar.events) {
@@ -767,4 +885,234 @@ export function buildPlaybackAttacks(
     }
   }
   return output;
+}
+
+// Vocal melody is independent from the six guitar strings and has one voice.
+export function writtenVocalNotes(a: Arrangement) {
+  const size = barTicks(a.meter);
+  return listBars(a)
+    .flatMap(({ bar, number }) =>
+      (bar.vocalNotes ?? []).map((note) => ({
+        ...note,
+        barId: bar.id,
+        barNumber: number,
+        startTick: (number - 1) * size + note.tick,
+        barEnd: number * size,
+      })),
+    )
+    .sort((left, right) => left.startTick - right.startTick);
+}
+export type WrittenVocalNote = ReturnType<typeof writtenVocalNotes>[number];
+export function sameVocalPitch(left: VocalNote, right: VocalNote) {
+  return (
+    left.degree !== 0 &&
+    left.degree === right.degree &&
+    left.octave === right.octave &&
+    (left.accidental ?? 0) === (right.accidental ?? 0)
+  );
+}
+export function vocalProblems(a: Arrangement) {
+  const notes = writtenVocalNotes(a),
+    result: { barId: string; message: string; gap: number }[] = [];
+  notes.forEach((note, index) => {
+    const next = notes[index + 1];
+    if (
+      note.tick >= barTicks(a.meter) ||
+      note.startTick + note.durationTicks > note.barEnd ||
+      (next && note.startTick + note.durationTicks > next.startTick)
+    )
+      result.push({
+        barId: note.barId,
+        gap: 0,
+        message: "第 " + note.barNumber + " 小节的唱音时值超出小节或覆盖后音",
+      });
+    if (
+      note.tieToNext &&
+      (!next ||
+        !sameVocalPitch(note, next) ||
+        next.startTick !== note.startTick + note.durationTicks)
+    )
+      result.push({
+        barId: note.barId,
+        gap: 0,
+        message: "第 " + note.barNumber + " 小节的唱音延音必须连接紧邻的同音",
+      });
+  });
+  return result;
+}
+export function repairVocalLinks(a: Arrangement): Arrangement {
+  const notes = writtenVocalNotes(a),
+    edits = new Map<string, VocalNote>();
+  notes.forEach((note, index) => {
+    const next = notes[index + 1],
+      durationTicks = Math.max(
+        1,
+        Math.min(
+          note.durationTicks,
+          note.barEnd - note.startTick,
+          (next?.startTick ?? Infinity) - note.startTick,
+        ),
+      );
+    edits.set(note.id, {
+      id: note.id,
+      tick: note.tick,
+      degree: note.degree,
+      octave: note.octave,
+      ...(note.accidental !== undefined ? { accidental: note.accidental } : {}),
+      durationTicks,
+      ...(note.tieToNext
+        ? {
+            tieToNext:
+              !!next &&
+              sameVocalPitch(note, next) &&
+              next.startTick === note.startTick + durationTicks,
+          }
+        : {}),
+    });
+  });
+  return {
+    ...a,
+    sections: a.sections.map((section) => ({
+      ...section,
+      bars: section.bars.map((bar) => ({
+        ...bar,
+        ...(bar.vocalNotes
+          ? { vocalNotes: bar.vocalNotes.map((note) => edits.get(note.id)!) }
+          : {}),
+      })),
+    })),
+  };
+}
+
+// Lyrics anchor to vocal onsets by default; free text keeps an independent onset.
+// The optional legacy reference is resolved without modifying the loaded score.
+export function lyricVocalNote(
+  a: Arrangement,
+  barId: string,
+  lyric: ArrangementLyric,
+): WrittenVocalNote | undefined {
+  if (lyric.anchorMode === "free") return;
+  const item = listBars(a).find(({ bar }) => bar.id === barId);
+  if (!item) return;
+  const note = item.bar.vocalNotes?.find(
+    (candidate) =>
+      candidate.degree !== 0 &&
+      candidate.tick === lyric.tick &&
+      (!lyric.vocalNoteId || candidate.id === lyric.vocalNoteId),
+  );
+  return note
+    ? {
+        ...note,
+        barId,
+        barNumber: item.number,
+        startTick: (item.number - 1) * barTicks(a.meter) + note.tick,
+        barEnd: item.number * barTicks(a.meter),
+      }
+    : undefined;
+}
+export function lyricProblems(a: Arrangement) {
+  const notes = writtenVocalNotes(a),
+    byId = new Map(notes.map((note) => [note.id, note])),
+    byPosition = new Map(
+      notes.map((note) => [note.barId + ":" + note.tick, note]),
+    );
+  const result: { barId: string; message: string; gap: number }[] = [];
+  for (const { bar, number } of listBars(a))
+    for (const lyric of bar.lyrics ?? []) {
+      const source = lyric.vocalNoteId
+        ? byId.get(lyric.vocalNoteId)
+        : byPosition.get(bar.id + ":" + lyric.tick);
+      if (
+        lyric.anchorMode === "free" &&
+        (lyric.vocalNoteId || lyric.endVocalNoteId)
+      )
+        result.push({
+          barId: bar.id,
+          gap: 0,
+          message: "自由歌词不能同时关联唱音或延唱末音",
+        });
+      if (
+        lyric.vocalNoteId &&
+        (!source ||
+          source.degree === 0 ||
+          source.barId !== bar.id ||
+          source.tick !== lyric.tick)
+      )
+        result.push({
+          barId: bar.id,
+          gap: 0,
+          message: "第 " + number + " 小节歌词必须关联同拍的有效唱音",
+        });
+      if (lyric.endVocalNoteId) {
+        const end = byId.get(lyric.endVocalNoteId);
+        if (
+          lyric.anchorMode === "free" ||
+          !source ||
+          source.degree === 0 ||
+          !end ||
+          end.degree === 0 ||
+          end.startTick < source.startTick
+        )
+          result.push({
+            barId: bar.id,
+            gap: 0,
+            message: "歌词延唱末音必须在关联唱音之后，且不能是休止",
+          });
+      }
+    }
+  return result;
+}
+// Used after deleting/reordering bars. Never throw away text when its note disappears.
+export function repairLyricLinks(a: Arrangement): Arrangement {
+  const notes = writtenVocalNotes(a),
+    byId = new Map(notes.map((note) => [note.id, note])),
+    byPosition = new Map(
+      notes.map((note) => [note.barId + ":" + note.tick, note]),
+    );
+  let changed = false;
+  const sections = a.sections.map((section) => ({
+    ...section,
+    bars: section.bars.map((bar) => {
+      if (!bar.lyrics) return bar;
+      const lyrics = bar.lyrics.map((lyric) => {
+        const source = lyric.vocalNoteId
+          ? byId.get(lyric.vocalNoteId)
+          : byPosition.get(bar.id + ":" + lyric.tick);
+        const invalidSource =
+          !!lyric.vocalNoteId &&
+          (!source ||
+            source.degree === 0 ||
+            source.barId !== bar.id ||
+            source.tick !== lyric.tick);
+        const end = lyric.endVocalNoteId
+          ? byId.get(lyric.endVocalNoteId)
+          : undefined;
+        const invalidEnd =
+          !!lyric.endVocalNoteId &&
+          (!source ||
+            source.degree === 0 ||
+            !end ||
+            end.degree === 0 ||
+            end.startTick < source.startTick);
+        if (
+          invalidSource ||
+          (lyric.anchorMode === "free" &&
+            (lyric.vocalNoteId || lyric.endVocalNoteId)) ||
+          invalidEnd
+        ) {
+          const result = { ...lyric };
+          if (invalidSource || lyric.anchorMode === "free") {
+            result.anchorMode = "free";
+            delete result.vocalNoteId;
+          }
+          delete result.endVocalNoteId;
+          changed = true;
+          return result;
+        }
+        return lyric;
+      });
+      return { ...bar, lyrics };
+    }),
+  }));
+  return changed ? { ...a, sections } : a;
 }

@@ -621,7 +621,6 @@ export default function PerformanceReader({
                 className="performance-pages"
                 style={{
                   width: zoom + "%",
-                  maxWidth: (1280 * Number(zoom)) / 100,
                 }}
               >
                 {score.pages.map((p, i) => (

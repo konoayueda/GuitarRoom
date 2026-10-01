@@ -25,6 +25,7 @@ export type RhythmItem = {
   tick: number;
   duration: number;
   rest: boolean;
+  measureRest?: boolean;
   lane: number;
   strings: number[];
   shape?: RhythmShape;
@@ -60,6 +61,23 @@ export function barRhythm(
   const items = [...groups.values()].sort(
     (a, b) => a.tick - b.tick || b.duration - a.duration,
   );
+  if (!items.length) {
+    const rest: RhythmItem = {
+      tick: 0,
+      duration: limit,
+      rest: true,
+      measureRest: true,
+      lane: 0,
+      strings: [],
+      shape: { base: 96, beams: 0, dots: 0, triplet: false },
+    };
+    return {
+      items: [rest],
+      tuplets: [] as { items: RhythmItem[]; complete: boolean }[],
+      beamGroups: [] as RhythmItem[][],
+      lanes: 1,
+    };
+  }
   const laneEnds: number[] = [],
     stringLanes = new Map<number, number>();
   for (const item of items) {
@@ -81,12 +99,37 @@ export function barRhythm(
   // notes get separate lanes instead of silently adopting the first duration.
   const primary = items.filter((n) => n.lane === 0),
     rests: RhythmItem[] = [];
+  // Tuplet silence belongs only to a window introduced by an actual tuplet note.
+  const windows = primary
+    .filter((item) => item.shape?.triplet)
+    .map((item) => {
+      const span = item.duration * 3,
+        start = Math.floor(item.tick / span) * span;
+      return { start, end: Math.min(limit, start + span), step: item.duration };
+    });
+  const pulse = meter === "6/8" ? 36 : 24;
   function silence(start: number, end: number) {
-    const values = [
-      96, 84, 72, 48, 42, 36, 24, 21, 18, 16, 12, 9, 8, 6, 4, 3, 2, 1,
-    ];
     while (start < end) {
-      const duration = values.find((v) => v <= end - start)!;
+      const window = windows.find((w) => start >= w.start && start < w.end);
+      const nextWindow = windows
+        .filter((w) => w.start > start)
+        .reduce((n, w) => Math.min(n, w.start), end);
+      const boundary = Math.min(
+        end,
+        window?.end ?? Math.ceil((start + 1) / pulse) * pulse,
+        nextWindow,
+      );
+      const inTuplet =
+        !!window &&
+        (start - window.start) % window.step === 0 &&
+        start + window.step <= boundary;
+      const values =
+        meter === "6/8" ? [36, 24, 18, 12, 6, 3, 1] : [24, 12, 6, 3, 1];
+      const duration = inTuplet
+        ? window!.step
+        : values.find(
+            (v) => v <= boundary - start && (start % pulse) % v === 0,
+          )!;
       rests.push({
         tick: start,
         duration,

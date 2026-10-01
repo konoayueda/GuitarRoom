@@ -705,7 +705,6 @@ export default function Reader({
                 className="sheet-paper"
                 style={{
                   width: zoom + "%",
-                  maxWidth: (900 * Number(zoom)) / 100,
                 }}
               >
                 <ScoreCanvas

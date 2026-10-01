@@ -55,6 +55,9 @@ export default function ScoreNoteTools({
   onTie,
   tied,
   canTie,
+  tieHint,
+  onPreviousTie,
+  previousTied,
   onCopy,
   onCut,
   onPaste,
@@ -80,6 +83,9 @@ export default function ScoreNoteTools({
   onTie: () => void;
   tied: boolean;
   canTie: boolean;
+  tieHint: string;
+  onPreviousTie: () => void;
+  previousTied: boolean;
   onCopy: () => void;
   onCut: () => void;
   onPaste: () => void;
@@ -154,12 +160,22 @@ export default function ScoreNoteTools({
           <button
             disabled={locked || !canTie}
             aria-label="延音连接（L）"
-            title="连接同弦同品的下一音（L）"
+            title={tieHint + "（L）"}
             aria-pressed={tied}
             onClick={onTie}
           >
             <strong>⌒</strong>
             <small>延音</small>
+          </button>
+          <button
+            disabled={locked || !canTie}
+            aria-label="接到前音（Shift+L）"
+            title="将当前音接到前一个同弦同品音（Shift+L）"
+            aria-pressed={previousTied}
+            onClick={onPreviousTie}
+          >
+            <strong>←⌒</strong>
+            <small>接前音</small>
           </button>
         </div>
         <div className="gp-selection-tools" role="group" aria-label="片段编辑">
@@ -263,7 +279,7 @@ export default function ScoreNoteTools({
             <kbd>.</kbd> 附点 · <kbd>/</kbd> 三连音
           </span>
           <span>
-            <kbd>R</kbd> 休止 · <kbd>L</kbd> 延音
+            <kbd>R</kbd> 休止 · <kbd>L</kbd> 延音 · <kbd>Shift+L</kbd> 接前音
           </span>
           <span>
             <kbd>Shift+←/→</kbd> 选区
@@ -275,7 +291,7 @@ export default function ScoreNoteTools({
             <kbd>Space</kbd> 试听 · <kbd>Ctrl/Cmd+S</kbd> 保存
           </span>
           <p>
-            点击只移动光标；在同一拍上下换弦可写和音。粘贴会覆盖目标范围，并保留片段的和弦、奏法与休止。
+            点击只移动光标；在同一拍上下换弦可写和音。延音连接后面的同音；后面没有同音时会补上续音，支持跨小节。粘贴会覆盖目标范围，并保留片段的和弦、奏法与休止。
           </p>
         </div>
       )}

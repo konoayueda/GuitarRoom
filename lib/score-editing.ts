@@ -7,7 +7,16 @@ import {
   writtenNotes,
   type Arrangement,
   type ArrangementEvent,
+  type ArrangementLyric,
+  type VocalNote,
+  type VocalKey,
+  writtenVocalNotes,
 } from "./arrangement";
+import {
+  lyricLineCount,
+  vocalPitchForKey,
+  lyricVocalNote,
+} from "./vocal-score";
 export type ScoreCursor = {
   barId: string;
   eventId: string;
@@ -25,6 +34,10 @@ export type ScorePassage = {
     stroke: ArrangementEvent["stroke"];
   }[];
   notes: (Note & { start: number; durationTicks: number })[];
+  lyrics?: (Omit<ArrangementLyric, "tick"> & { start: number })[];
+  lyricLineCount?: number;
+  vocalKey?: VocalKey;
+  vocalNotes?: (VocalNote & { start: number })[];
 };
 export function cursorTick(a: Arrangement, c: ScoreCursor) {
   const bars = listBars(a),
@@ -82,8 +95,12 @@ function explicit(e: ArrangementEvent, a: Arrangement): Note[] {
     ...(n.tieToNext ? { tieToNext: true } : {}),
   }));
 }
-// A rest also cuts notes that sustain into the chosen interval.
-export function clearPassage(a: Arrangement, span: TickSpan): Arrangement {
+// Cut notes that sustain into the interval; note-only rests can keep sung lyrics.
+export function clearPassage(
+  a: Arrangement,
+  span: TickSpan,
+  clearLyrics = true,
+): Arrangement {
   const size = barTicks(a.meter);
   let bi = 0;
   return repairNoteLinks({
@@ -91,9 +108,39 @@ export function clearPassage(a: Arrangement, span: TickSpan): Arrangement {
     sections: a.sections.map((s) => ({
       ...s,
       bars: s.bars.map((b) => {
-        let at = bi++ * size;
+        const base = bi++ * size;
+        let at = base;
         return {
           ...b,
+          ...(clearLyrics && b.lyrics
+            ? {
+                lyrics: b.lyrics.filter(
+                  (lyric) =>
+                    base + lyric.tick < span.start ||
+                    base + lyric.tick >= span.end,
+                ),
+              }
+            : {}),
+          ...(clearLyrics && b.vocalNotes
+            ? {
+                vocalNotes: b.vocalNotes
+                  .filter(
+                    (note) =>
+                      base + note.tick < span.start ||
+                      base + note.tick >= span.end,
+                  )
+                  .map((note) =>
+                    base + note.tick < span.start &&
+                    base + note.tick + note.durationTicks > span.start
+                      ? {
+                          ...note,
+                          durationTicks: span.start - base - note.tick,
+                          tieToNext: false,
+                        }
+                      : note,
+                  ),
+              }
+            : {}),
           events: b.events.map((e) => {
             const start = at;
             at += e.durationTicks;
@@ -146,9 +193,21 @@ export function clearPassage(a: Arrangement, span: TickSpan): Arrangement {
 }
 export function copyPassage(a: Arrangement, span: TickSpan): ScorePassage {
   const events: ScorePassage["events"] = [];
+  const lyrics: NonNullable<ScorePassage["lyrics"]> = [];
   const size = barTicks(a.meter);
   listBars(a).forEach(({ bar }, i) => {
     let at = i * size;
+    for (const lyric of bar.lyrics ?? []) {
+      const { tick: localTick, ...body } = lyric;
+      const tick = at + localTick,
+        bound = lyricVocalNote(a, bar.id, lyric);
+      if (tick >= span.start && tick < span.end)
+        lyrics.push({
+          ...body,
+          start: tick - span.start,
+          ...(bound ? { vocalNoteId: bound.id } : {}),
+        });
+    }
     for (const e of bar.events) {
       const start = Math.max(at, span.start),
         end = Math.min(at + e.durationTicks, span.end);
@@ -178,9 +237,54 @@ export function copyPassage(a: Arrangement, span: TickSpan): ScorePassage {
         ? { tieToNext: true }
         : {}),
     }));
-  return { ticks: span.end - span.start, events, notes };
+  const vocalNotes: NonNullable<ScorePassage["vocalNotes"]> = writtenVocalNotes(
+    a,
+  )
+    .filter(
+      (note) =>
+        note.startTick < span.end &&
+        note.startTick + note.durationTicks > span.start,
+    )
+    .map((note) => {
+      const start = Math.max(span.start, note.startTick),
+        end = Math.min(span.end, note.startTick + note.durationTicks);
+      return {
+        id: note.id,
+        tick: 0,
+        start: start - span.start,
+        degree: note.degree,
+        octave: note.octave,
+        ...(note.accidental !== undefined
+          ? { accidental: note.accidental }
+          : {}),
+        durationTicks: end - start,
+        ...(note.tieToNext && end < span.end ? { tieToNext: true } : {}),
+      };
+    });
+  const copiedIds = new Set(
+    vocalNotes.filter((note) => note.degree !== 0).map((note) => note.id),
+  );
+  const copiedLyrics = lyrics.map((lyric) => {
+    const result = { ...lyric };
+    if (result.vocalNoteId && !copiedIds.has(result.vocalNoteId)) {
+      result.anchorMode = "free";
+      delete result.vocalNoteId;
+    }
+    if (result.endVocalNoteId && !copiedIds.has(result.endVocalNoteId))
+      delete result.endVocalNoteId;
+    return result;
+  });
+  return {
+    ticks: span.end - span.start,
+    events,
+    notes,
+    lyrics: copiedLyrics,
+    vocalNotes,
+    lyricLineCount: lyricLineCount(a),
+    vocalKey: a.vocalKey ?? "C",
+  };
 }
-// Replace a musical interval, including rests and harmony, without shifting later music.
+// Replace a musical interval, including rests, harmony and lyrics, without shifting later music.
 export function pastePassage(
   a: Arrangement,
   at: number,
@@ -191,9 +295,17 @@ export function pastePassage(
   if (at < 0 || !Number.isInteger(at) || end > listBars(a).length * size)
     throw Error("剩余小节不足，请先添加小节再粘贴。");
   const cleared = clearPassage(a, { start: at, end });
+  const vocalIds = new Map(
+    (passage.vocalNotes ?? []).map((note) => [note.id, crypto.randomUUID()]),
+  );
   let bi = 0;
   const result: Arrangement = {
     ...cleared,
+    lyricLineCount: Math.max(
+      lyricLineCount(cleared),
+      passage.lyricLineCount ?? 1,
+      ...(passage.lyrics ?? []).map((lyric) => lyric.verse + 1),
+    ),
     sections: cleared.sections.map((s) => ({
       ...s,
       bars: s.bars.map((b) => {
@@ -272,8 +384,64 @@ export function pastePassage(
             },
           });
         }
+        const lyrics = [
+          ...(b.lyrics ?? []),
+          ...(passage.lyrics ?? [])
+            .filter((lyric) => {
+              const tick = at + lyric.start;
+              return tick >= base && tick < base + size;
+            })
+            .map((lyric) => {
+              const { start, ...body } = lyric;
+              const copied: ArrangementLyric = {
+                ...body,
+                tick: at + start - base,
+              };
+              if (copied.vocalNoteId) {
+                const target = vocalIds.get(copied.vocalNoteId);
+                if (target) copied.vocalNoteId = target;
+                else {
+                  copied.anchorMode = "free";
+                  delete copied.vocalNoteId;
+                }
+              }
+              if (copied.endVocalNoteId) {
+                const target = vocalIds.get(copied.endVocalNoteId);
+                if (target && copied.anchorMode !== "free")
+                  copied.endVocalNoteId = target;
+                else delete copied.endVocalNoteId;
+              }
+              return copied;
+            }),
+        ].sort(
+          (left, right) => left.tick - right.tick || left.verse - right.verse,
+        );
+        const vocalNotes: VocalNote[] = [...(b.vocalNotes ?? [])];
+        for (const note of passage.vocalNotes ?? []) {
+          const ns = at + note.start,
+            ne = ns + note.durationTicks,
+            onset = Math.max(base, ns),
+            stop = Math.min(base + size, ne);
+          if (stop <= onset) continue;
+          vocalNotes.push({
+            id: onset === ns ? vocalIds.get(note.id)! : crypto.randomUUID(),
+            tick: onset - base,
+            ...vocalPitchForKey(
+              note,
+              passage.vocalKey ?? "C",
+              a.vocalKey ?? "C",
+            ),
+            durationTicks: stop - onset,
+            ...(note.degree !== 0 && (ne > base + size || note.tieToNext)
+              ? { tieToNext: true }
+              : {}),
+          });
+        }
+        vocalNotes.sort((left, right) => left.tick - right.tick);
         return {
           ...b,
+          ...(b.lyrics || lyrics.length ? { lyrics } : {}),
+          ...(b.vocalNotes || vocalNotes.length ? { vocalNotes } : {}),
           events: fragments.sort((a, b) => a.at - b.at).map((f) => f.event),
         };
       }),

@@ -32,6 +32,24 @@ import {
   ChevronRight,
 } from "lucide-react";
 import ScoreNoteTools from "./score-note-tools";
+import VocalTools from "./vocal-tools";
+import {
+  lyricLineCount,
+  addLyricLine,
+  removeLyricLine,
+  setLyricPosition,
+  setLyricText,
+  setLyricAnchor,
+  setLyricLayout,
+  setLyricExtend,
+  lyricVocalNote,
+  writtenVocalNotes,
+  setVocalNote,
+  deleteVocalNote,
+  moveVocalNote,
+  toggleVocalTie,
+  vocalNoteDuration,
+} from "@/lib/vocal-score";
 import { rhythmShape } from "@/lib/notation";
 import {
   cursorAt,
@@ -54,7 +72,6 @@ import {
   GRID_OPTIONS,
   beatLabel,
   writtenNotes,
-  noteCapacity,
   tieCandidate,
   repairNoteLinks,
   duplicateBar,
@@ -67,14 +84,21 @@ import {
   type Arrangement,
   type ArrangementBar,
   type ArrangementEvent,
+  type ArrangementVocalNote,
 } from "@/lib/arrangement";
 import {
-  writeNote,
-  materializeNotes,
   splitEvent,
   resizeEvent,
   durationCapacity,
 } from "@/lib/arrangement-edit";
+import {
+  putScoreNote,
+  removeScoreNote,
+  setNoteDuration,
+  scoreNoteDuration,
+  scoreTieAvailability,
+  toggleScoreTie,
+} from "@/lib/continuous-note-edit";
 import type { Score } from "@/lib/models";
 import { Choice, downloadBlob } from "./room-controls";
 import { useArrangementPlayer } from "./arrangement-player";
@@ -112,6 +136,19 @@ export default function ArrangementEditor({
   onPlay: () => void;
 }) {
   const value = draft ?? score.arrangement ?? EMPTY_ARRANGEMENT;
+  const [lane, setLane] = useState<"guitar" | "vocal" | "lyrics">("guitar");
+  const [vocalCursor, setVocalCursor] = useState({ barId: "", tick: 0 });
+  const [lyricCursor, setLyricCursor] = useState({
+    barId: "",
+    tick: 0,
+    verse: 0,
+  });
+  const [lyricMode, setLyricMode] = useState<"time" | "layout">("time");
+  const [lyricEntryMode, setLyricEntryMode] = useState<"auto" | "free">("auto");
+  const [vocalDuration, setVocalDuration] = useState(12);
+  const [playbackPart, setPlaybackPart] = useState<"both" | "guitar" | "vocal">(
+    "both",
+  );
   const [grid, setGrid] = useState("12");
   const [inputDuration, setInputDuration] = useState(12);
   const [anchor, setAnchor] = useState<ScoreSelection | null>(null);
@@ -131,10 +168,47 @@ export default function ArrangementEditor({
     [from, setFrom] = useState(""),
     [to, setTo] = useState(""),
     [loop, setLoop] = useState(false);
+  const lyricSession = useRef({ key: "", changed: false });
   const digits = useRef({ cell: "", time: 0, value: "", changed: false });
   const bars = listBars(value),
     limit = barTicks(value.meter),
     issues = arrangementProblems(value);
+  const lines = lyricLineCount(value);
+  const lyricSelection = {
+    ...lyricCursor,
+    verse: Math.min(lines - 1, lyricCursor.verse),
+  };
+  const selectedLyric = bars
+    .find((b) => b.bar.id === lyricSelection.barId)
+    ?.bar.lyrics?.find(
+      (l) => l.tick === lyricSelection.tick && l.verse === lyricSelection.verse,
+    );
+  const linkedVocal = selectedLyric
+    ? lyricVocalNote(value, lyricSelection.barId, selectedLyric)
+    : undefined;
+  const lyricEndOptions = linkedVocal
+    ? writtenVocalNotes(value)
+        .filter((n) => n.degree > 0 && n.startTick > linkedVocal.startTick)
+        .map((n) => ({
+          value: "note:" + n.id,
+          label:
+            "第 " +
+            (Math.floor(n.startTick / limit) + 1) +
+            " 小节 · 第 " +
+            Number(
+              (1 + n.tick / (value.meter === "6/8" ? 12 : 24)).toFixed(3),
+            ) +
+            " 拍 · " +
+            n.degree,
+        }))
+    : [];
+  const selectedVocal = bars
+    .find((b) => b.bar.id === vocalCursor.barId)
+    ?.bar.vocalNotes?.find((n) => n.tick === vocalCursor.tick);
+  const voiceDuration =
+    vocalNoteDuration(value, vocalCursor.barId, vocalCursor.tick) ??
+    vocalDuration;
+  const activeLaneCursor = lane === "vocal" ? vocalCursor : lyricSelection;
   const chosen = bars.find((b) => b.bar.id === selected.barId);
   const event = chosen?.bar.events.find((e) => e.id === selected.eventId);
   const currentTick = cursorTick(value, selected);
@@ -146,7 +220,7 @@ export default function ArrangementEditor({
             n.stringIndex === selected.stringIndex,
         )
       : undefined;
-  const currentDuration = currentNote?.durationTicks ?? inputDuration;
+  const currentDuration = scoreNoteDuration(value, selected) ?? inputDuration;
   const selectionSpan = scoreSpan(value, selected, anchor, currentDuration);
   const allWritten = writtenNotes(value);
   const selectedWritten = allWritten.find(
@@ -155,9 +229,19 @@ export default function ArrangementEditor({
       n.offsetTick === selected.tick &&
       n.stringIndex === selected.stringIndex,
   );
-  const tieTarget = selectedWritten
-    ? tieCandidate(allWritten, selectedWritten)
+  const tieAction = scoreTieAvailability(value, selected);
+  const previousWritten = selectedWritten
+    ? allWritten
+        .filter(
+          (n) =>
+            n.stringIndex === selectedWritten.stringIndex &&
+            n.startTick < selectedWritten.startTick,
+        )
+        .at(-1)
     : undefined;
+  const previousTied =
+    !!previousWritten?.tieToNext &&
+    tieCandidate(allWritten, previousWritten) === selectedWritten;
   const range =
     scope === "range" && bars.length
       ? {
@@ -175,6 +259,7 @@ export default function ArrangementEditor({
       range,
       loop,
       stopPlayback,
+      playbackPart,
     );
   const locked = saving || player.playing,
     invalid = issues.length > 0 || !arrangementSchema.safeParse(value).success;
@@ -187,6 +272,7 @@ export default function ArrangementEditor({
   const playingEvent = player.position?.event;
   function change(next: Arrangement, coalesce = false) {
     next = repairNoteLinks(next);
+    lyricSession.current = { key: "", changed: false };
     if (locked || JSON.stringify(next) === JSON.stringify(value)) return;
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
@@ -263,6 +349,269 @@ export default function ArrangementEditor({
       coalesce,
     );
   }
+  function editLyric(barId: string, tick: number, verse: number, text: string) {
+    if (locked) return;
+    const previous =
+      bars
+        .find((b) => b.bar.id === barId)
+        ?.bar.lyrics?.find((l) => l.tick === tick && l.verse === verse)?.text ??
+      "";
+    const nextText = text.slice(0, 120);
+    if (previous === nextText) return;
+    const key = barId + ":" + tick + ":" + verse;
+    const coalesce =
+      lyricSession.current.key === key && lyricSession.current.changed;
+    change(
+      setLyricText(value, barId, tick, verse, nextText, lyricEntryMode),
+      coalesce,
+    );
+    lyricSession.current = { key, changed: true };
+  }
+  function chooseLane(next: "guitar" | "vocal" | "lyrics") {
+    setLane(next);
+    if (bars.length) {
+      if (!bars.some((b) => b.bar.id === vocalCursor.barId))
+        setVocalCursor({ barId: bars[0].bar.id, tick: 0 });
+      if (!bars.some((b) => b.bar.id === lyricCursor.barId))
+        setLyricCursor({ barId: bars[0].bar.id, tick: 0, verse: 0 });
+    }
+  }
+  function selectVocal(barId: string, tick: number) {
+    if (locked) return;
+    setLane("vocal");
+    setVocalCursor({ barId, tick });
+    setAnchor(null);
+    setRangeMode(false);
+    const duration = vocalNoteDuration(value, barId, tick);
+    if (duration) setVocalDuration(Math.min(96, duration));
+  }
+  function selectLyric(barId: string, tick: number, verse: number) {
+    if (locked) return;
+    setLane("lyrics");
+    setLyricCursor({ barId, tick, verse });
+    const lyric = bars
+      .find((b) => b.bar.id === barId)
+      ?.bar.lyrics?.find((l) => l.tick === tick && l.verse === verse);
+    if (lyric) setLyricEntryMode(lyric.anchorMode ?? "auto");
+    setAnchor(null);
+    setRangeMode(false);
+  }
+  function lyricAnchorChange(mode: "auto" | "free") {
+    if (locked) return;
+    try {
+      if (selectedLyric)
+        change(
+          setLyricAnchor(
+            value,
+            lyricSelection.barId,
+            lyricSelection.tick,
+            lyricSelection.verse,
+            mode,
+          ),
+        );
+      setLyricEntryMode(mode);
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function layoutLyric(
+    barId: string,
+    verse: number,
+    tick: number,
+    offsetX: number,
+    offsetY: number,
+  ) {
+    if (locked) return;
+    try {
+      change(setLyricLayout(value, barId, tick, verse, offsetX, offsetY));
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function extendLyric(id?: string) {
+    if (locked || !selectedLyric) return;
+    try {
+      change(
+        setLyricExtend(
+          value,
+          lyricSelection.barId,
+          lyricSelection.tick,
+          lyricSelection.verse,
+          id,
+        ),
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function focusVocal(cursor = vocalCursor) {
+    requestAnimationFrame(() => {
+      const cell = document.querySelector<SVGGElement>(
+        '[data-vocal-cell="' +
+          CSS.escape(cursor.barId + ":" + cursor.tick) +
+          '"]',
+      );
+      cell?.focus({ preventScroll: true });
+      cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }
+  function writeVocal(patch: Partial<ArrangementVocalNote>) {
+    if (locked || !vocalCursor.barId) return;
+    try {
+      change(
+        setVocalNote(value, vocalCursor.barId, vocalCursor.tick, {
+          degree: selectedVocal?.degree ?? 1,
+          octave: selectedVocal?.octave ?? 0,
+          accidental: selectedVocal?.accidental ?? 0,
+          durationTicks: voiceDuration,
+          ...patch,
+        }),
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+    focusVocal();
+  }
+  function voiceDurationChange(ticks: number) {
+    if (locked || !Number.isInteger(ticks) || ticks < 1 || ticks > 96) return;
+    setVocalDuration(ticks);
+    if (selectedVocal) writeVocal({ durationTicks: ticks });
+    else focusVocal();
+  }
+  function voiceTie() {
+    if (locked) return;
+    try {
+      change(toggleVocalTie(value, vocalCursor.barId, vocalCursor.tick));
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+    focusVocal();
+  }
+  function moveLyric(
+    barId: string,
+    verse: number,
+    tick: number,
+    absolute: number,
+  ) {
+    if (locked) return;
+    const item = bars[Math.floor(absolute / limit)];
+    if (!item || absolute < 0) {
+      toast.error("位置超出曲谱，请先添加小节。");
+      return;
+    }
+    try {
+      if (
+        bars
+          .find((b) => b.bar.id === barId)
+          ?.bar.lyrics?.some((l) => l.tick === tick && l.verse === verse)
+      )
+        change(setLyricPosition(value, barId, verse, tick, absolute));
+      setLyricCursor({ barId: item.bar.id, tick: absolute % limit, verse });
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function lanePosition(barId: string, tick: number) {
+    const i = bars.findIndex((b) => b.bar.id === barId);
+    if (i < 0 || tick < 0 || tick >= limit) return;
+    const absolute = i * limit + tick;
+    if (lane === "lyrics") {
+      moveLyric(
+        lyricSelection.barId,
+        lyricSelection.verse,
+        lyricSelection.tick,
+        absolute,
+      );
+      return;
+    }
+    if (locked) return;
+    try {
+      if (selectedVocal)
+        change(
+          moveVocalNote(value, vocalCursor.barId, vocalCursor.tick, absolute),
+        );
+      setVocalCursor({ barId, tick });
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function nudgeLane(delta: number) {
+    const i = bars.findIndex((b) => b.bar.id === activeLaneCursor.barId),
+      absolute = i * limit + activeLaneCursor.tick + delta;
+    const item = bars[Math.floor(absolute / limit)];
+    if (!item || absolute < 0) {
+      toast.error("位置超出曲谱，请先添加小节。");
+      return;
+    }
+    lanePosition(item.bar.id, absolute % limit);
+  }
+  function vocalKey(
+    event: KeyboardEvent<SVGGElement>,
+    barId: string,
+    tick: number,
+  ) {
+    if (editorKey(event)) return;
+    if (locked || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (barId !== vocalCursor.barId || tick !== vocalCursor.tick) {
+      selectVocal(barId, tick);
+      return;
+    }
+    if (/^[0-7]$/.test(event.key)) {
+      event.preventDefault();
+      writeVocal({ degree: Number(event.key) });
+    } else if (["Delete", "Backspace"].includes(event.key)) {
+      event.preventDefault();
+      try {
+        change(deleteVocalNote(value, barId, tick));
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+      focusVocal();
+    } else if (event.key.toLowerCase() === "r") {
+      event.preventDefault();
+      writeVocal({ degree: 0, octave: 0, accidental: 0 });
+    } else if (event.key.toLowerCase() === "l") {
+      event.preventDefault();
+      voiceTie();
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      writeVocal({
+        octave: Math.max(
+          -2,
+          Math.min(
+            2,
+            (selectedVocal?.octave ?? 0) + (event.key === "ArrowUp" ? 1 : -1),
+          ),
+        ),
+      });
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const i = bars.findIndex((b) => b.bar.id === barId),
+        absolute =
+          i * limit +
+          tick +
+          (event.key === "ArrowRight" ? voiceDuration : -vocalDuration),
+        item = bars[Math.floor(absolute / limit)];
+      if (item && absolute >= 0) {
+        const next = { barId: item.bar.id, tick: absolute % limit };
+        selectVocal(next.barId, next.tick);
+        focusVocal(next);
+      }
+    } else if (["+", "=", "-", "_", ".", "/"].includes(event.key)) {
+      event.preventDefault();
+      const shape = rhythmShape(voiceDuration),
+        base = shape?.base ?? 12;
+      voiceDurationChange(
+        event.key === "."
+          ? base * (shape?.dots === 0 ? 1.5 : shape?.dots === 1 ? 1.75 : 1)
+          : event.key === "/"
+            ? shape?.triplet
+              ? base
+              : (base * 2) / 3
+            : voiceDuration * (["+", "="].includes(event.key) ? 0.5 : 2),
+      );
+    }
+  }
   function editEvent(patch: Partial<ArrangementEvent>) {
     if (chosen && event)
       editBar(chosen.bar.id, (b) => ({
@@ -294,6 +643,11 @@ export default function ArrangementEditor({
     });
   }
   function restoreFocus(selection = selected) {
+    if (lane === "vocal") {
+      focusVocal();
+      return;
+    }
+    if (lane === "lyrics") return;
     if (selection.tick !== undefined)
       document
         .querySelector<SVGGElement>(".editable-score .score-note-cell.picked")
@@ -307,6 +661,7 @@ export default function ArrangementEditor({
   }
   function select(selection: ScoreSelection, extend = false) {
     if (locked) return;
+    setLane("guitar");
     digits.current = { cell: "", time: 0, value: "", changed: false };
     if (extend || rangeMode) {
       if (!anchor && selected.tick !== undefined) setAnchor(selected);
@@ -322,7 +677,10 @@ export default function ArrangementEditor({
           n.offsetTick === selection.tick &&
           n.stringIndex === selection.stringIndex,
       );
-    if (n) setInputDuration(n.durationTicks);
+    if (n)
+      setInputDuration(
+        Math.min(96, scoreNoteDuration(value, selection) ?? n.durationTicks),
+      );
     if (selection.tick === undefined) setProperties(true);
   }
   function moveCursor(direction: number, extend = false) {
@@ -363,69 +721,89 @@ export default function ArrangementEditor({
         : selectedWritten
           ? [selectedWritten]
           : [];
-    if (targets.some((n) => ticks > noteCapacity(allWritten, n))) {
-      toast.error(
-        "这个时值会覆盖同弦后音或越过小节线，请先留出空拍，跨小节使用延音连接。",
+    try {
+      // Resize each selected tie chain once; continuations belong to their selected head.
+      const continued = new Set(
+        targets
+          .filter((n) => n.tieToNext)
+          .map((n) => tieCandidate(allWritten, n))
+          .filter(Boolean)
+          .map((n) => n!.eventId + ":" + n!.offsetTick + ":" + n!.stringIndex),
       );
-      restoreFocus();
-      return;
-    }
-    setInputDuration(ticks);
-    if (targets.length) {
-      const keys = new Set(
-        targets.map(
-          (n) => n.eventId + ":" + n.offsetTick + ":" + n.stringIndex,
-        ),
-      );
-      change({
-        ...value,
-        sections: value.sections.map((section) => ({
-          ...section,
-          bars: section.bars.map((bar) => ({
-            ...bar,
-            events: bar.events.map((e) =>
-              targets.some((n) => n.eventId === e.id)
-                ? {
-                    ...e,
-                    notes: materializeNotes(e, value.pattern).map((n) =>
-                      keys.has(e.id + ":" + n.offsetTick + ":" + n.stringIndex)
-                        ? {
-                            ...n,
-                            durationTicks: ticks,
-                            sustainTicks: undefined,
-                            tieToNext: false,
-                          }
-                        : n,
-                    ),
-                  }
-                : e,
-            ),
-          })),
-        })),
-      });
+      let next = value;
+      for (const note of [...targets].reverse()) {
+        if (
+          continued.has(
+            note.eventId + ":" + note.offsetTick + ":" + note.stringIndex,
+          )
+        )
+          continue;
+        next = setNoteDuration(
+          next,
+          {
+            barId: note.barId,
+            eventId: note.eventId,
+            tick: note.offsetTick,
+            stringIndex: note.stringIndex,
+          },
+          ticks,
+        );
+      }
+      setInputDuration(ticks);
+      if (targets.length) change(next);
+    } catch (error) {
+      toast.error((error as Error).message);
     }
     restoreFocus();
   }
   function toggleTie() {
-    if (!selectedWritten || locked) return;
-    editEvent({
-      notes: materializeNotes(event!, value.pattern).map((n) =>
-        n.offsetTick === selected.tick && n.stringIndex === selected.stringIndex
-          ? {
-              ...n,
-              ...(n.tieToNext
-                ? { tieToNext: false }
-                : tieTarget
-                  ? {
-                      durationTicks:
-                        tieTarget.startTick - selectedWritten.startTick,
-                      tieToNext: true,
-                    }
-                  : {}),
-            }
-          : n,
-      ),
-    });
+    if (locked) return;
+    try {
+      change(toggleScoreTie(value, selected));
+      toast.success(
+        tieAction.action === "disconnect"
+          ? "已取消延音连接"
+          : tieAction.action === "create"
+            ? "已补上续音并连接延音"
+            : "已连接同音，试听只拨一次",
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+    restoreFocus();
+  }
+  function togglePreviousTie() {
+    if (locked || !selectedWritten) return;
+    if (!previousWritten) {
+      toast.error(
+        "前面还没有同弦音符，请先写好前音，或使用「延音」补上后面的续音。",
+      );
+      restoreFocus();
+      return;
+    }
+    if (
+      previousWritten.fret !== selectedWritten.fret ||
+      selectedWritten.fret < 0
+    ) {
+      toast.error("延音需要同弦同品；当前音与前一个音的品位不同。");
+      restoreFocus();
+      return;
+    }
+    try {
+      change(
+        toggleScoreTie(value, {
+          barId: previousWritten.barId,
+          eventId: previousWritten.eventId,
+          tick: previousWritten.offsetTick,
+          stringIndex: previousWritten.stringIndex,
+        }),
+      );
+      toast.success(
+        previousTied ? "已取消与前音的连接" : "已接到前一个同音，试听只拨一次",
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
     restoreFocus();
   }
   function rest() {
@@ -437,7 +815,7 @@ export default function ArrangementEditor({
             start: currentTick,
             end: Math.min(bars.length * limit, currentTick + currentDuration),
           };
-    change(clearPassage(value, span));
+    change(clearPassage(value, span, false));
     setAnchor(null);
     setRangeMode(false);
     restoreFocus();
@@ -447,7 +825,7 @@ export default function ArrangementEditor({
     setClipboard(copyPassage(value, selectionSpan));
     if (cut) change(clearPassage(value, selectionSpan));
     toast.success(cut ? "已剪切片段" : "已复制片段", {
-      description: "包含和弦与休止；粘贴将覆盖光标后的相同时长。",
+      description: "包含和弦、音符和歌词；粘贴将覆盖光标后的相同时长。",
     });
     restoreFocus();
   }
@@ -491,6 +869,12 @@ export default function ArrangementEditor({
     if (cmd && key === "y") {
       e.preventDefault();
       redo();
+      return true;
+    }
+    if (e.key === " " && target.closest(".vocal-lane-hit,.vocal-note-target")) {
+      e.preventDefault();
+      if (player.playing) player.stop();
+      else if (!invalid && !saving && bars.length) void play();
       return true;
     }
     if (!target.closest(".score-note-cell")) return false;
@@ -538,26 +922,23 @@ export default function ArrangementEditor({
         n.stringIndex === selection.stringIndex,
     );
     if ((note?.fret ?? null) === fret && note?.marker === marker) return false;
-    editBar(
-      selection.barId,
-      (b) => ({
-        ...b,
-        events: b.events.map((e) =>
-          e.id === selection.eventId
-            ? writeNote(
-                e,
-                value.pattern,
-                selection.tick!,
-                selection.stringIndex!,
-                fret,
-                inputDuration,
-                marker,
-              )
-            : e,
-        ),
-      }),
-      coalesce,
-    );
+    try {
+      change(
+        fret === null
+          ? removeScoreNote(value, selection)
+          : putScoreNote(
+              value,
+              selection,
+              fret,
+              scoreNoteDuration(value, selection) ?? inputDuration,
+              marker,
+            ),
+        coalesce,
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+      return false;
+    }
     return true;
   }
   function putChordNote(selection: ScoreSelection) {
@@ -579,8 +960,10 @@ export default function ArrangementEditor({
       const shape = rhythmShape(currentDuration),
         base = shape?.base ?? 12;
       if (e.key.toLowerCase() === "r") rest();
-      else if (e.key.toLowerCase() === "l") toggleTie();
-      else if (e.key === ".")
+      else if (e.key.toLowerCase() === "l") {
+        if (e.shiftKey) togglePreviousTie();
+        else toggleTie();
+      } else if (e.key === ".")
         applyDuration(
           base * (shape?.dots === 0 ? 1.5 : shape?.dots === 1 ? 1.75 : 1),
         );
@@ -762,29 +1145,7 @@ export default function ArrangementEditor({
             n.stringIndex === selected.stringIndex,
         )
       : undefined;
-    const allNotes = writtenNotes(value);
-    const written = note
-      ? allNotes.find(
-          (n) =>
-            n.eventId === event.id &&
-            n.offsetTick === selected.tick &&
-            n.stringIndex === selected.stringIndex,
-        )
-      : undefined;
-    const target = written ? tieCandidate(allNotes, written) : undefined;
-    function rhythm(
-      patch: Partial<NonNullable<ArrangementEvent["notes"]>[number]>,
-    ) {
-      if (patch.durationTicks) setInputDuration(patch.durationTicks);
-      editEvent({
-        notes: materializeNotes(event!, value.pattern).map((n) =>
-          n.offsetTick === selected.tick &&
-          n.stringIndex === selected.stringIndex
-            ? { ...n, ...patch }
-            : n,
-        ),
-      });
-    }
+    const written = selectedWritten;
     const capacity = durationCapacity(chosen.bar, event.id, limit);
     const issue = issues.find((i) => i.barId === barId);
     return (
@@ -796,7 +1157,7 @@ export default function ArrangementEditor({
         <div className="score-inline-heading">
           <strong>
             {noteMode
-              ? `${6 - selected.stringIndex!} 弦 · ${beatLabel(chosen.bar.events.slice(0, chosen.bar.events.indexOf(event)).reduce((n, e) => n + e.durationTicks, 0) + selected.tick!)}`
+              ? `${6 - selected.stringIndex!} 弦 · ${beatLabel(chosen.bar.events.slice(0, chosen.bar.events.indexOf(event)).reduce((n, e) => n + e.durationTicks, 0) + selected.tick!, value.meter)}`
               : `第 ${chosen.number} 小节 · 和弦与节奏`}
           </strong>
           <button
@@ -864,18 +1225,9 @@ export default function ArrangementEditor({
                   音符时值
                   <Choice
                     label="当前音符时值"
-                    value={String(note.durationTicks)}
-                    options={durationOptions(
-                      noteCapacity(allNotes, written),
-                      note.durationTicks,
-                    )}
-                    onChange={(v) =>
-                      rhythm({
-                        durationTicks: Number(v),
-                        sustainTicks: undefined,
-                        tieToNext: false,
-                      })
-                    }
+                    value={String(currentDuration)}
+                    options={durationOptions(96, currentDuration)}
+                    onChange={(v) => applyDuration(Number(v))}
                   />
                 </label>
                 <button
@@ -884,28 +1236,20 @@ export default function ArrangementEditor({
                     (note.tieToNext ? "primary" : "secondary-button")
                   }
                   aria-pressed={!!note.tieToNext}
-                  disabled={!note.tieToNext && !target}
-                  onClick={() =>
-                    rhythm(
-                      note.tieToNext
-                        ? { tieToNext: false }
-                        : {
-                            durationTicks:
-                              target!.startTick - written.startTick,
-                            tieToNext: true,
-                          },
-                    )
-                  }
+                  disabled={!written}
+                  title={tieAction.reason}
+                  onClick={toggleTie}
                 >
-                  {note.tieToNext ? "取消延音连接" : "连到下一同音"}
+                  {note.tieToNext ? "取消延音连接" : "连接 / 补上续音"}
                 </button>
-                <small>
-                  {note.tieToNext
-                    ? "连线中的音只拨一次。"
-                    : target
-                      ? "可连接紧邻的同弦同品音符。"
-                      : "下一音需在同弦同品，并位于本小节或下一小节开头。"}
-                </small>
+                <button
+                  className="button secondary-button"
+                  onClick={togglePreviousTie}
+                  aria-pressed={previousTied}
+                >
+                  {previousTied ? "取消与前音连接" : "接到前一个同音"}
+                </button>
+                <small>{tieAction.reason}</small>
               </>
             )}
             <small>
@@ -1228,62 +1572,173 @@ export default function ArrangementEditor({
             从原谱识别
           </button>
         </fieldset>
-        <ScoreNoteTools
-          duration={currentDuration}
-          onDuration={applyDuration}
-          locked={locked}
-          onRest={rest}
-          onTie={toggleTie}
-          tied={!!currentNote?.tieToNext}
-          canTie={!!currentNote?.tieToNext || !!tieTarget}
-          onCopy={() => copy()}
-          onCut={() => copy(true)}
-          onPaste={paste}
-          canCopy={currentTick !== undefined}
-          canPaste={!!clipboard && currentTick !== undefined}
-          onAnchor={() => {
-            if (anchor) {
-              setAnchor(null);
-              setRangeMode(false);
-            } else {
-              setAnchor(selected);
-              setRangeMode(true);
+        <div
+          className="score-track-tabs"
+          role="group"
+          aria-label="选择编辑声部"
+        >
+          {(["guitar", "vocal", "lyrics"] as const).map((part) => (
+            <button
+              key={part}
+              aria-pressed={lane === part}
+              disabled={locked}
+              onClick={() => chooseLane(part)}
+            >
+              {part === "guitar"
+                ? "吉他六线谱"
+                : part === "vocal"
+                  ? "唱音简谱"
+                  : "歌词"}
+            </button>
+          ))}
+          <span>吉他与人声共用节拍，各自编排</span>
+        </div>
+        {lane === "guitar" ? (
+          <ScoreNoteTools
+            duration={currentDuration}
+            onDuration={applyDuration}
+            locked={locked}
+            onRest={rest}
+            onTie={toggleTie}
+            tied={!!currentNote?.tieToNext}
+            canTie={!!currentNote}
+            tieHint={tieAction.reason}
+            onPreviousTie={togglePreviousTie}
+            previousTied={previousTied}
+            onCopy={() => copy()}
+            onCut={() => copy(true)}
+            onPaste={paste}
+            canCopy={currentTick !== undefined}
+            canPaste={!!clipboard && currentTick !== undefined}
+            onAnchor={() => {
+              if (anchor) {
+                setAnchor(null);
+                setRangeMode(false);
+              } else {
+                setAnchor(selected);
+                setRangeMode(true);
+              }
+              restoreFocus();
+            }}
+            selecting={!!anchor}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={!!history.length}
+            canRedo={!!future.length}
+            onMove={(direction) => moveCursor(direction, rangeMode)}
+            onProperties={() => setProperties((v) => !v)}
+            properties={properties}
+            location={
+              chosen
+                ? "第 " +
+                  chosen.number +
+                  " 小节" +
+                  (currentTick !== undefined
+                    ? " · " +
+                      beatLabel(currentTick % limit, value.meter) +
+                      " · " +
+                      (6 - selected.stringIndex!) +
+                      " 弦"
+                    : " · 和弦") +
+                  (anchor && selectionSpan
+                    ? " · 已选 " +
+                      ((selectionSpan.end - selectionSpan.start) / 24)
+                        .toFixed(2)
+                        .replace(/\.?0+$/, "") +
+                      " 拍"
+                    : "")
+                : "点击谱面定位，选择时值后输入品位；跨小节自动延音"
             }
-            restoreFocus();
-          }}
-          selecting={!!anchor}
-          onUndo={undo}
-          onRedo={redo}
-          canUndo={!!history.length}
-          canRedo={!!future.length}
-          onMove={(direction) => moveCursor(direction, rangeMode)}
-          onProperties={() => setProperties((v) => !v)}
-          properties={properties}
-          location={
-            chosen
-              ? "第 " +
-                chosen.number +
-                " 小节" +
-                (currentTick !== undefined
-                  ? " · " +
-                    beatLabel(currentTick % limit) +
-                    " · " +
-                    (6 - selected.stringIndex!) +
-                    " 弦"
-                  : " · 和弦") +
-                (anchor && selectionSpan
-                  ? " · 已选 " +
-                    ((selectionSpan.end - selectionSpan.start) / 24)
-                      .toFixed(2)
-                      .replace(/\.?0+$/, "") +
-                    " 拍"
-                  : "")
-              : "点击谱面定位，选择时值后输入品位"
-          }
-          onHelp={() => setHelp((v) => !v)}
-          help={help}
-        />
-        {currentTick !== undefined && (
+            onHelp={() => setHelp((v) => !v)}
+            help={help}
+          />
+        ) : (
+          <VocalTools
+            lane={lane}
+            locked={locked}
+            bars={bars.map((b) => ({ id: b.bar.id, number: b.number }))}
+            barId={activeLaneCursor.barId}
+            tick={activeLaneCursor.tick}
+            meter={value.meter}
+            lineCount={lines}
+            verse={lyricSelection.verse}
+            onVerse={(verse) =>
+              selectLyric(lyricSelection.barId, lyricSelection.tick, verse)
+            }
+            onAddLine={() => {
+              try {
+                change(addLyricLine(value));
+                setLyricCursor({ ...lyricSelection, verse: lines });
+              } catch (error) {
+                toast.error((error as Error).message);
+              }
+            }}
+            onDeleteLine={() => {
+              try {
+                change(removeLyricLine(value, lyricSelection.verse));
+                setLyricCursor({
+                  ...lyricSelection,
+                  verse: Math.min(lyricSelection.verse, lines - 2),
+                });
+              } catch (error) {
+                toast.error((error as Error).message);
+              }
+            }}
+            onPosition={lanePosition}
+            onNudge={nudgeLane}
+            lyricMode={lyricMode}
+            onLyricMode={setLyricMode}
+            lyricAnchor={
+              selectedLyric
+                ? (selectedLyric.anchorMode ?? "auto")
+                : lyricEntryMode
+            }
+            onLyricAnchor={lyricAnchorChange}
+            lyric={selectedLyric}
+            lyricBound={!!linkedVocal}
+            onLyricLayout={(x, y) =>
+              layoutLyric(
+                lyricSelection.barId,
+                lyricSelection.verse,
+                lyricSelection.tick,
+                x,
+                y,
+              )
+            }
+            lyricEndOptions={lyricEndOptions}
+            onLyricExtend={extendLyric}
+            vocal={selectedVocal}
+            vocalDuration={voiceDuration}
+            onDuration={voiceDurationChange}
+            onPitch={writeVocal}
+            onFocus={focusVocal}
+            onDelete={() => {
+              if (lane === "lyrics")
+                editLyric(
+                  lyricSelection.barId,
+                  lyricSelection.tick,
+                  lyricSelection.verse,
+                  "",
+                );
+              else {
+                change(
+                  deleteVocalNote(value, vocalCursor.barId, vocalCursor.tick),
+                );
+                focusVocal();
+              }
+            }}
+            onTie={voiceTie}
+            vocalKey={value.vocalKey ?? "C"}
+            onKey={(key) =>
+              change({ ...value, vocalKey: key as Arrangement["vocalKey"] })
+            }
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={!!history.length}
+            canRedo={!!future.length}
+          />
+        )}
+        {lane === "guitar" && currentTick !== undefined && (
           <div className="gp-fret-entry">
             <select
               aria-label="输入弦位"
@@ -1376,7 +1831,8 @@ export default function ArrangementEditor({
       ) : (
         <div
           className={
-            "gp-score-workspace " + (properties ? "properties-open" : "")
+            "gp-score-workspace " +
+            (properties && lane === "guitar" ? "properties-open" : "")
           }
         >
           <div className="gp-score-paper">
@@ -1392,6 +1848,23 @@ export default function ArrangementEditor({
                 onSelect: select,
                 onKey: noteKey,
                 inspector: () => null,
+                onLyricChange: editLyric,
+                lyricSelected: lane === "lyrics" ? lyricSelection : undefined,
+                onLyricSelect: selectLyric,
+                onLyricMove: moveLyric,
+                lyricActive: lane === "lyrics",
+                lyricMode,
+                onLyricLayout: layoutLyric,
+                vocalActive: lane === "vocal",
+                vocalSelected: lane === "vocal" ? vocalCursor : undefined,
+                onVocalSelect: selectVocal,
+                onVocalKey: vocalKey,
+                onLyricBegin: (barId, tick, verse) => {
+                  lyricSession.current = {
+                    key: barId + ":" + tick + ":" + verse,
+                    changed: false,
+                  };
+                },
                 range: anchor ? selectionSpan : undefined,
                 sectionHeading: (id, si) => {
                   const section = value.sections[si];
@@ -1682,6 +2155,16 @@ export default function ArrangementEditor({
         </div>
         <div className="transport-range">
           <Choice
+            label="试听声部"
+            value={playbackPart}
+            onChange={(part) => setPlaybackPart(part as typeof playbackPart)}
+            options={[
+              { value: "both", label: "吉他 + 唱音" },
+              { value: "guitar", label: "吉他" },
+              { value: "vocal", label: "唱音旋律" },
+            ]}
+          />
+          <Choice
             label="试听范围"
             value={scope}
             onChange={setScope}
@@ -1713,7 +2196,7 @@ export default function ArrangementEditor({
           <small>
             {scope === "range"
               ? "保留所选段落的播放遍数。"
-              : "按当前谱面试听 · 合成拨弦音色"}
+              : "按当前谱面试听 · 唱音使用合成旋律音色"}
           </small>
         </div>
       </div>

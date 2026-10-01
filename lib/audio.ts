@@ -60,3 +60,33 @@ export async function playChord(frets: number[], capo = 0, spread = 0.04) {
         ],
   );
 }
+
+/** A sustained reference tone for the written vocal melody. */
+export function melodyTone(
+  midi: number,
+  when: number,
+  endAt: number,
+  volume = 0.18,
+) {
+  const ctx = audioContext(),
+    source = ctx.createOscillator(),
+    gain = ctx.createGain();
+  source.type = "triangle";
+  source.frequency.value = 440 * 2 ** ((midi - 69) / 12);
+  const duration = Math.max(0.001, endAt - when),
+    attackEnd = when + Math.min(0.02, duration / 3),
+    releaseStart = Math.max(attackEnd, endAt - Math.min(0.035, duration / 3));
+  gain.gain.setValueAtTime(0, when);
+  gain.gain.linearRampToValueAtTime(volume, attackEnd);
+  gain.gain.setValueAtTime(volume, releaseStart);
+  gain.gain.linearRampToValueAtTime(0, Math.max(when + 0.001, endAt));
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(when);
+  source.stop(Math.max(when + 0.022, endAt + 0.01));
+  source.onended = () => {
+    source.disconnect();
+    gain.disconnect();
+  };
+  return source;
+}

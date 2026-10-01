@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { audioContext, pluck } from "@/lib/audio";
+import { audioContext, pluck, melodyTone } from "@/lib/audio";
 import {
   buildPlayback,
   buildPlaybackAttacks,
@@ -9,6 +9,9 @@ import {
   type PlaybackEvent,
   type PlaybackPlan,
 } from "@/lib/arrangement";
+
+import { vocalPlayback } from "@/lib/vocal-score";
+export type PlaybackPart = "both" | "guitar" | "vocal";
 
 export type PlaybackPosition = {
   event: PlaybackEvent;
@@ -22,19 +25,41 @@ export function startArrangementAudio(
   loop: boolean,
   onPosition: (p: PlaybackPosition) => void,
   onEnd: () => void,
+  part: PlaybackPart = "both",
 ) {
   const ctx = audioContext(),
     seconds = tickSeconds(arrangement.bpm),
     startAt = ctx.currentTime + 0.07;
-  const sources = new Set<AudioBufferSourceNode>();
-  const notes = buildPlaybackAttacks(plan, arrangement, capo);
+  const sources = new Set<AudioBufferSourceNode | OscillatorNode>();
+  const notes = [
+    ...(part === "vocal"
+      ? []
+      : buildPlaybackAttacks(plan, arrangement, capo).map((n) => ({
+          ...n,
+          sound: "guitar" as const,
+        }))),
+    ...(part === "guitar"
+      ? []
+      : vocalPlayback(arrangement, plan).map((n) => ({
+          ...n,
+          sound: "vocal" as const,
+        }))),
+  ].sort((a, b) => a.startTick - b.startTick);
   let cursor = 0,
     pass = 0,
     last = -1,
     frame = 0,
     closed = false;
-  function add(midi: number, at: number, end: number) {
-    const source = pluck(midi, at, 0.26, end);
+  function add(
+    midi: number,
+    at: number,
+    end: number,
+    sound: "guitar" | "vocal",
+  ) {
+    const source =
+      sound === "vocal"
+        ? melodyTone(midi, at, end)
+        : pluck(midi, at, 0.26, end);
     sources.add(source);
     source.addEventListener("ended", () => sources.delete(source), {
       once: true,
@@ -60,7 +85,7 @@ export function startArrangementAudio(
             note.delaySeconds,
             Math.max(0, (end - Math.max(now, at)) * 0.5),
           );
-        if (end > start) add(note.midi, start, end);
+        if (end > start) add(note.midi, start, end, note.sound);
       }
       cursor++;
     }
@@ -112,6 +137,7 @@ export function useArrangementPlayer(
   range: { from: string; to: string } | undefined,
   loop: boolean,
   stopWhen = false,
+  part: PlaybackPart = "both",
 ) {
   const [playing, setPlaying] = useState(false),
     [position, setPosition] = useState<PlaybackPosition | null>(null);
@@ -135,7 +161,7 @@ export function useArrangementPlayer(
       dispose.current?.();
       dispose.current = null;
     };
-  }, [arrangement, capo, active, range?.from, range?.to, loop, stop]);
+  }, [arrangement, capo, active, range?.from, range?.to, loop, part, stop]);
   useEffect(() => {
     // Starting the metronome stops any independently scheduled arrangement audio.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -160,6 +186,7 @@ export function useArrangementPlayer(
         setPlaying(false);
         setPosition(null);
       },
+      part,
     );
   }
   return { playing, position, play, stop };
