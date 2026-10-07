@@ -82,7 +82,7 @@ export async function PATCH(
     if (result.meta.changes !== 1)
       throw new ApiError(409, "曲谱刚刚有新的修改，请保留输入并刷新后重试。");
     return noCache(normalizeScore(next));
-  });
+  }, req);
 }
 
 export async function DELETE(
@@ -156,5 +156,5 @@ export async function DELETE(
       cleanupPending = true;
     }
     return noCache({ deleted: true, cleanupPending });
-  });
+  }, req);
 }

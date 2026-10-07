@@ -29,5 +29,5 @@ export async function POST(req: Request) {
       .bind(body.id, user, JSON.stringify(body))
       .run();
     return noCache(body);
-  });
+  }, req);
 }

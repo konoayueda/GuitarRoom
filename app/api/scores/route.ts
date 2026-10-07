@@ -208,5 +208,5 @@ export async function POST(req: Request) {
       await Promise.allSettled(objects.map((f) => bucket().delete(f.key)));
       throw e;
     }
-  });
+  }, req);
 }

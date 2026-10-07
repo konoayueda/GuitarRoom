@@ -1,0 +1,310 @@
+libvips-8.18.6\libvips\freqfilt\spectrum.c:3: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\convolution\spcor.c:3: * Copyright: 1990, N. Dessipris; 2006, 2007 Nottingham Trent University.
+libvips-8.18.6\libvips\convolution\spcor.c:6: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\freqfilt\phasecor.c:3: * Copyright: 2008, Nottingham Trent University
+libvips-8.18.6\libvips\freqfilt\phasecor.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\convolution\sharpen.c:5: * Copyright: 1995 A. Abbood
+libvips-8.18.6\libvips\convolution\sharpen.c:6: * Author: A. Abbood
+libvips-8.18.6\libvips\freqfilt\pfreqfilt.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\convolution\pconvolution.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\freqfilt\invfft.c:3: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\freqfilt\fwfft.c:3: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\convolution\fastcor.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\convolution\fastcor.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\freqfilt\freqmult.c:3: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\freqfilt\freqfilt.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\draw\draw_smudge.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\convolution\correlation.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\draw\draw_rect.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\histogram\stdif.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\histogram\stdif.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\draw\draw_mask.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\deprecated\cooc_funcs.c:31: * Copyright: N. Dessipris 1991
+libvips-8.18.6\libvips\histogram\phistogram.h:8:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\draw\draw_line.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\histogram\hist_local.c:3: * Copyright: 1991, N. Dessipris
+libvips-8.18.6\libvips\histogram\hist_local.c:5: * Author: N. Dessipris
+libvips-8.18.6\libvips\convolution\convolution.c:11:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\histogram\percent.c:3: * Copyright: 1990, N. Dessipris
+libvips-8.18.6\libvips\histogram\percent.c:5: * Author: N. Dessipris
+libvips-8.18.6\libvips\draw\draw_image.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\histogram\hist_ismonotonic.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\histogram\hist_equal.c:3: * Copyright: 1991, N. Dessipris.
+libvips-8.18.6\libvips\histogram\hist_equal.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\convolution\convi.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\convolution\convi.c:5: * Author: Nicos Dessipris & Kirk Martinez
+libvips-8.18.6\libvips\histogram\hist_unary.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\histogram\hist_entropy.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\histogram\hist_unary.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\convolution\convf.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\convolution\convf.c:5: * Author: Nicos Dessipris & Kirk Martinez
+libvips-8.18.6\libvips\deprecated\im_align_bands.c:4: * Copyright: Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_align_bands.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\histogram\hist_cum.c:3: * Author: N. Dessipris
+libvips-8.18.6\libvips\histogram\hist_plot.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\histogram\hist_plot.c:5: * Author: Nicos Dessipris.
+libvips-8.18.6\libvips\convolution\convasep.c:5: * Author: John Cupitt & Nicolas Robidoux
+libvips-8.18.6\libvips\mosaicing\tbmosaic.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\tbmosaic.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\histogram\histogram.c:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\histogram\hist_norm.c:3: * Author: N. Dessipris
+libvips-8.18.6\libvips\deprecated\glds_funcs.c:31: * Copyright:  N. Dessipris, 1991
+libvips-8.18.6\libvips\mosaicing\tbmerge.c:13: * Copyright: 1990, 1991 N. Dessipris
+libvips-8.18.6\libvips\mosaicing\tbmerge.c:14: * Author: N. Dessipris
+libvips-8.18.6\libvips\convolution\conva.c:5: * Author: John Cupitt & Nicolas Robidoux
+libvips-8.18.6\libvips\histogram\hist_match.c:3: * Copyright: 1991, N. Dessipris.
+libvips-8.18.6\libvips\histogram\hist_match.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\resample\thumbnail.c:50:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\bandjoin.c:3: * Copyright: 1991, N. Dessipris, modification of im_bandjoin()
+libvips-8.18.6\libvips\conversion\bandjoin.c:5: * Author: N. Dessipris
+libvips-8.18.6\libvips\mosaicing\pmosaicing.h:6: * Copyright: 1990, 1991 N. Dessipris
+libvips-8.18.6\libvips\mosaicing\pmosaicing.h:7: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\mosaicing\pmosaicing.h:14:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\mosaicing\mosaicing.c:7:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\bandbool.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\resample\shrinkv.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\resample\shrinkv.c:5: * Authors: Nicos Dessipris and Kirk Martinez
+libvips-8.18.6\libvips\deprecated\im_convsub.c:15: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_convsub.c:17: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\bandary.c:3: * Copyright: 1991, N. Dessipris, modification of im_bandary()
+libvips-8.18.6\libvips\conversion\bandary.c:5: * Author: N. Dessipris
+libvips-8.18.6\libvips\mosaicing\matrixmultiply.c:3: * Copyright: 1990, K. Martinez and J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_cmulnorm.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_cmulnorm.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\cast.c:3: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_clamp.c:11: * Copyright: 1993 KM
+libvips-8.18.6\libvips\mosaicing\lrmosaic.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\lrmosaic.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\bandmean.c:3: * Author: Simon Goodall
+libvips-8.18.6\libvips\conversion\bandmean.c:16:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\tonelut.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\mosaicing\lrmerge.c:3: * Copyright: 1990, 1991 N. Dessipris
+libvips-8.18.6\libvips\mosaicing\lrmerge.c:4: * Author: N. Dessipris
+libvips-8.18.6\libvips\resample\resample.c:12:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\flip.c:3: * Copyright: 1990, N. Dessipris
+libvips-8.18.6\libvips\include\vips\error.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\flatten.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\create\sines.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\create\sines.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_gfadd.c:16: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_gfadd.c:18: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\mosaicing\im_tbcalcon.c:27: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\im_tbcalcon.c:29: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\extract.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\conversion\extract.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_gaddim.c:17: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_gaddim.c:19: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\mosaicing\im_lrcalcon.c:31: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\im_lrcalcon.c:33: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\gamma.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\conversion\embed.c:3: * Author: J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_gadd.c:16: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_gadd.c:18: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\create\point.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\insert.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\conversion\insert.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_freq_mask.c:3: * Copyright: N. Dessipris 1991,
+libvips-8.18.6\libvips\conversion\copy.c:3: * Copyright: 1990, N. Dessipris, based on im_powtra()
+libvips-8.18.6\libvips\conversion\copy.c:4: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\mosaicing\im_improve.c:15: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\im_improve.c:17: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_fav4.c:2:Copyright (C) 1992, Kirk Martinez, History of Art Dept, Birkbeck College
+libvips-8.18.6\libvips\conversion\conversion.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\resample\presample.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\pmask.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\mosaicing\im_clinear.c:15: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\im_clinear.c:17: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\join.c:3: * Copyright 1990, 1991: Kirk Martinez, N. Dessipris
+libvips-8.18.6\libvips\conversion\join.c:4: * Author: Kirk Martinez, N. Dessipris
+libvips-8.18.6\libvips\conversion\msb.c:3: * Copyright: 2006, The Nottingham Trent University
+libvips-8.18.6\libvips\conversion\msb.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\mosaicing\im_avgdxdy.c:12: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\im_avgdxdy.c:14: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\conversion\premultiply.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\conversion\recomb.c:14:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\pcreate.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\pconversion.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\im_debugim.c:11: * Copyright: 1991 N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_debugim.c:13: * Author: N. Dessipris
+libvips-8.18.6\libvips\conversion\rot.c:3: * Copyright: 1991, N. Dessipris
+libvips-8.18.6\libvips\mosaicing\chkpair.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\mosaicing\chkpair.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_matinv.c:3: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\deprecated\im_matinv.c:4: * Copyright: 2006, Tom Vajzovic
+libvips-8.18.6\libvips\resample\affine.c:3: * Copyright N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_mask2vips.c:3: * Author: J.Cupitt
+libvips-8.18.6\libvips\colour\Lab2LabQ.c:5: * Copyright K.Martinez 3/5/93
+libvips-8.18.6\libvips\colour\Lab2LabQ.c:82: * Copyright 1993 K.Martinez
+libvips-8.18.6\libvips\colour\icc_transform.c:485:		cmsInfoCopyright
+libvips-8.18.6\libvips\colour\icc_transform.c:491:		"copyright"
+libvips-8.18.6\libvips\deprecated\im_litecor.c:22: * Copyright: 1990, J. Cupitt, 1991 N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_litecor.c:24: * Author: J. Cupitt, N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_linreg.c:3: * Copyright: 2006, The Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_linreg.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\include\vips\vips.h:2: * Authors: N. Dessipris, K. Martinez, Birkbeck College, London.
+libvips-8.18.6\libvips\deprecated\im_line.c:6: * Copyright: N. Dessipris
+libvips-8.18.6\libvips\colour\float2rad.c:43:	permission. The Radience copyright notice appears below.
+libvips-8.18.6\libvips\colour\float2rad.c:50: * Copyright (c) 1990 - 2009 The Regents of the University of California,
+libvips-8.18.6\libvips\colour\float2rad.c:57: * 1. Redistributions of source code must retain the above copyright
+libvips-8.18.6\libvips\colour\float2rad.c:60: * 2. Redistributions in binary form must reproduce the above copyright
+libvips-8.18.6\libvips\morphology\rank.c:3: * Author: JC
+libvips-8.18.6\libvips\morphology\pmorphology.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\im_gradcor.c:3: * Copyright: 2007 Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_gradcor.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\conversion\zoom.c:3: * Author: N. Martinez 1991
+libvips-8.18.6\libvips\include\vips\operation.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\conversion\wrap.c:3: * Copyright: 2008, Nottingham Trent University
+libvips-8.18.6\libvips\conversion\wrap.c:4: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\conversion\scale.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\include\vips\object.h:6:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\conversion\rot45.c:3: * Author: N. Dessipris (Copyright, N. Dessipris 1991)
+libvips-8.18.6\libvips\conversion\unpremultiply.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\deprecated\im_point_bilinear.c:3: * Copyright: 2006, The Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_point_bilinear.c:5: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\include\vips\transform.h:6:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\morphology\morphology.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\identity.c:3: * Copyright 1991, N. Dessipris.
+libvips-8.18.6\libvips\morphology\countlines.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\morphology\countlines.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\foreign\pforeign.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\grey.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\create\grey.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_maxpos_subpel.c:3: * Copyright: 2008, Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_maxpos_subpel.c:4: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\create\gaussnoise.c:3: * Copyright 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_maxpos_avg.c:3: * Copyright: 2006, The Nottingham Trent University
+libvips-8.18.6\libvips\deprecated\im_maxpos_avg.c:4: * Copyright: 2006, Tom Vajzovic
+libvips-8.18.6\libvips\deprecated\im_maxpos_avg.c:6: * Author: Tom Vajzovic
+libvips-8.18.6\libvips\foreign\openslideload.c:5: * Copyright (c) 2011-2015 Carnegie Mellon University
+libvips-8.18.6\libvips\deprecated\im_mattrn.c:3: * Copyright: 1990, K. Martinez and J. Cupitt
+libvips-8.18.6\libvips\create\fractsurf.c:3: * Author: N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_matmul.c:3: * Copyright: 1990, K. Martinez and J. Cupitt
+libvips-8.18.6\libvips\create\eye.c:3: * Copyright: 1990, 1991, N.Dessipris.
+libvips-8.18.6\libvips\create\create.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\create\black.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\create\black.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_thresh.c:11: * Copyright: 1991, N. Dessipris, J Cupitt
+libvips-8.18.6\libvips\deprecated\im_thresh.c:13: * Author: N. Dessipris, J. Cupitt
+libvips-8.18.6\libvips\deprecated\im_spatres.c:11: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_spatres.c:13: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\colour\LabQ2Lab.c:3: * Copyright Kirk Martinez 2/5/1993
+libvips-8.18.6\libvips\foreign\radiance.c:81:	permission. The Radience copyright notice appears below.
+libvips-8.18.6\libvips\foreign\radiance.c:88: * Radiance v5.4 Copyright (c) 1990 to 2022, The Regents of the University of
+libvips-8.18.6\libvips\foreign\radiance.c:95: * (1) Redistributions of source code must retain the above copyright notice,
+libvips-8.18.6\libvips\foreign\radiance.c:98: * (2) Redistributions in binary form must reproduce the above copyright
+libvips-8.18.6\libvips\foreign\radiance.c:107: * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+libvips-8.18.6\libvips\foreign\radiance.c:110: * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+libvips-8.18.6\libvips\deprecated\im_slice.c:14: * Copyright: 1991, N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_slice.c:16: * Author: N. Dessipris
+libvips-8.18.6\libvips\foreign\quantise.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\im_simcontr.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_simcontr.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\deprecated\im_setbox.c:11: * Copyright: Nicos Dessipris
+libvips-8.18.6\libvips\foreign\libnsgif\test\nsgif.c:2: * Copyright 2008 Sean Fox <dyntryx@gmail.com>
+libvips-8.18.6\libvips\foreign\libnsgif\test\nsgif.c:3: * Copyright 2008 James Bursa <james@netsurf-browser.org>
+libvips-8.18.6\libvips\foreign\libnsgif\test\nsgif.c:4: * Copyright 2022 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\arithmetic\binary.c:13:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\abs.c:3: * Copyright: 1990, N. Dessipris, based on im_powtra()
+libvips-8.18.6\libvips\arithmetic\abs.c:4: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\abs.c:36:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\add.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\add.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\add.c:45:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\im_printlines.c:10: * Copyright: 1991 N. Dessipris
+libvips-8.18.6\libvips\deprecated\im_printlines.c:12: * Author: N. Dessipris
+libvips-8.18.6\libvips\foreign\libnsgif\test\cli.h:4: * Copyright (C) 2021-2022 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\arithmetic\arithmetic.c:15:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\avg.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\arithmetic\avg.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\arithmetic\clamp.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\libnsgif\test\cli.c:4: * Copyright (C) 2021-2022 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\arithmetic\binary.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\im_zerox.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\im_zerox.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\deviate.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\arithmetic\deviate.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\arithmetic\boolean.c:38:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\libnsgif\nsgif.h:2: * Copyright 2004 Richard Wilson <richard.wilson@netsurf-browser.org>
+libvips-8.18.6\libvips\foreign\libnsgif\nsgif.h:3: * Copyright 2008 Sean Fox <dyntryx@gmail.com>
+libvips-8.18.6\libvips\foreign\libnsgif\nsgif.h:4: * Copyright 2013-2022 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\arithmetic\complex.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\complex.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\complex.c:30:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\tiff2vips.c:1:/* TIFF parts: Copyright (c) 1988, 1990 by Sam Leffler.
+libvips-8.18.6\libvips\foreign\tiff2vips.c:19: *  Copyright July-1995 Ahmed Abbood.
+libvips-8.18.6\libvips\arithmetic\divide.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\divide.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\divide.c:40:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\getpoint.c:3: * Copyright: J. Cupitt
+libvips-8.18.6\libvips\foreign\tiff.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\libnsgif\lzw.h:6: * Copyright 2017 Michael Drake <michael.drake@codethink.co.uk>
+libvips-8.18.6\libvips\foreign\libnsgif\lzw.h:7: * Copyright 2021 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\colour\scRGB2sRGB.c:3: * Author: J-P. Laurent
+libvips-8.18.6\libvips\arithmetic\hist_find.c:3: * Copyright: 1990, 1991, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\hist_find.c:5: * Author: Nicos Dessipris.
+libvips-8.18.6\libvips\foreign\libnsgif\lzw.c:6: * Copyright 2017 Michael Drake <michael.drake@codethink.co.uk>
+libvips-8.18.6\libvips\foreign\libnsgif\lzw.c:7: * Copyright 2021 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\colour\rad2float.c:43:	permission. The Radience copyright notice appears below.
+libvips-8.18.6\libvips\colour\rad2float.c:50: * Copyright (c) 1990 - 2009 The Regents of the University of California,
+libvips-8.18.6\libvips\colour\rad2float.c:57: * 1. Redistributions of source code must retain the above copyright
+libvips-8.18.6\libvips\colour\rad2float.c:60: * 2. Redistributions in binary form must reproduce the above copyright
+libvips-8.18.6\libvips\foreign\vips2tiff.c:2: * Copyright (c) 1988, 1990 by Sam Leffler.
+libvips-8.18.6\libvips\foreign\vips2tiff.c:10: * MODIFICATION FOR VIPS Copyright 1991, K.Martinez
+libvips-8.18.6\libvips\foreign\vips2tiff.c:12: * software may be distributed FREE, with these copyright notices
+libvips-8.18.6\libvips\foreign\vips2tiff.c:18: *  Copyright 1994 Ahmed Abbood.
+libvips-8.18.6\libvips\iofuncs\dbuf.c:6:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\foreign\libnsgif\gif.c:2: * Copyright 2004 Richard Wilson <richard.wilson@netsurf-browser.org>
+libvips-8.18.6\libvips\foreign\libnsgif\gif.c:3: * Copyright 2008 Sean Fox <dyntryx@gmail.com>
+libvips-8.18.6\libvips\foreign\libnsgif\gif.c:4: * Copyright 2013-2022 Michael Drake <tlsa@netsurf-browser.org>
+libvips-8.18.6\libvips\deprecated\im_vips2mask.c:3: * Author: J.Cupitt
+libvips-8.18.6\libvips\iofuncs\util.c:6:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\deprecated\rw_mask.c:4:/* Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\deprecated\rw_mask.c:6: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\iofuncs\operation.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\deprecated\tone.c:3: * Author: John Cupitt
+libvips-8.18.6\libvips\iofuncs\error.c:3: * Copyright: N. Dessipris
+libvips-8.18.6\libvips\deprecated\rotmask.c:3: * Author: N. Dessipris (Copyright, N. Dessipris 1991)
+libvips-8.18.6\libvips\iofuncs\object.c:11:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\iofuncs\buf.c:6:	Copyright (C) 1991-2003 The National Gallery
+libvips-8.18.6\libvips\arithmetic\invert.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\invert.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\invert.c:24:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\iofuncs\mapfile.c:3: * Copyright: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\linear.c:3: * Copyright: 1990, N. Dessipris, based on im_powtra()
+libvips-8.18.6\libvips\arithmetic\linear.c:4: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\linear.c:52:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\jpeg.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\foreign\dbh.h:3: * (c) Copyright, 1986-1991
+libvips-8.18.6\libvips\arithmetic\math.c:3: * Copyright: 1990, N. Dessipris, based on im_powtra()
+libvips-8.18.6\libvips\arithmetic\math.c:4: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\math.c:32:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\math2.c:3: * Copyright: 1990, N. Dessipris
+libvips-8.18.6\libvips\arithmetic\math2.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\math2.c:33:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\max.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\arithmetic\max.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\foreign\exif.c:829:		tag == EXIF_TAG_COPYRIGHT ||
+libvips-8.18.6\libvips\arithmetic\maxpair.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\min.c:3: * Copyright: 1990, J. Cupitt
+libvips-8.18.6\libvips\arithmetic\min.c:5: * Author: J. Cupitt
+libvips-8.18.6\libvips\arithmetic\minpair.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\multiply.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\multiply.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\multiply.c:34:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\nary.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\nary.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\parithmetic.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\relational.c:39:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\remainder.c:25:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\round.c:16:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\sign.c:13:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\statistic.c:13:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\statistic.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\subtract.c:3: * Copyright: 1990, N. Dessipris.
+libvips-8.18.6\libvips\arithmetic\subtract.c:5: * Author: Nicos Dessipris
+libvips-8.18.6\libvips\arithmetic\subtract.c:38:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\sum.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\unary.c:9:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\unary.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\unaryconst.h:6:	Copyright (C) 1991-2005 The National Gallery
+libvips-8.18.6\libvips\arithmetic\unaryconst.c:11:	Copyright (C) 1991-2005 The National Gallery

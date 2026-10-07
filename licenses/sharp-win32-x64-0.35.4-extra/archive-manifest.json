@@ -1,0 +1,146 @@
+[
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/COPYING",
+    "destination": "glib-2.89.4/COPYING"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/LICENSES",
+    "destination": "glib-2.89.4/LICENSES"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/.reuse/dep5",
+    "destination": "glib-2.89.4/.reuse/dep5"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/README.md",
+    "destination": "glib-2.89.4/README.md"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/glib/glib.h",
+    "destination": "glib-2.89.4/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+    "archive_sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+    "archive_member": "glib-2.89.4/glib/garray.c",
+    "destination": "glib-2.89.4/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+    "archive_sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a",
+    "archive_member": "pango-1.58.2/COPYING",
+    "destination": "pango-1.58.2/COPYING"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+    "archive_sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a",
+    "archive_member": "pango-1.58.2/README.md",
+    "destination": "pango-1.58.2/README.md"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+    "archive_sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a",
+    "archive_member": "pango-1.58.2/pango/pango-context.c",
+    "destination": "pango-1.58.2/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.91.tar.xz",
+    "archive_sha256": "6caeae129d40dd88f8ec49436fd89bfe4ada716a125187a7fa0def8fcaa0b250",
+    "archive_member": "librsvg-2.62.91/COPYING.LIB",
+    "destination": "librsvg-2.62.91/COPYING.LIB"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.91.tar.xz",
+    "archive_sha256": "6caeae129d40dd88f8ec49436fd89bfe4ada716a125187a7fa0def8fcaa0b250",
+    "archive_member": "librsvg-2.62.91/AUTHORS",
+    "destination": "librsvg-2.62.91/AUTHORS"
+  },
+  {
+    "source_archive": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.91.tar.xz",
+    "archive_sha256": "6caeae129d40dd88f8ec49436fd89bfe4ada716a125187a7fa0def8fcaa0b250",
+    "archive_member": "librsvg-2.62.91/README.md",
+    "destination": "librsvg-2.62.91/README.md"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/libvips/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "f410acb673e0b71c1eacbf757f28c9b235cbd29bf960001a0d2f21587bbce3ff",
+    "archive_member": "libvips-8.18.6/LICENSE",
+    "destination": "libvips-8.18.6/LICENSE"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/libvips/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "f410acb673e0b71c1eacbf757f28c9b235cbd29bf960001a0d2f21587bbce3ff",
+    "archive_member": "libvips-8.18.6/README.md",
+    "destination": "libvips-8.18.6/README.md"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/libvips/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "f410acb673e0b71c1eacbf757f28c9b235cbd29bf960001a0d2f21587bbce3ff",
+    "archive_member": "libvips-8.18.6/libvips/iofuncs/vips.c",
+    "destination": "libvips-8.18.6/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/libvips/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "f410acb673e0b71c1eacbf757f28c9b235cbd29bf960001a0d2f21587bbce3ff",
+    "archive_member": "libvips-8.18.6/libvips/foreign/libnsgif/COPYING",
+    "destination": "libvips-8.18.6/libvips/foreign/libnsgif/COPYING"
+  },
+  {
+    "source_archive": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "archive_sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "archive_member": "cairo-1.18.4/COPYING",
+    "destination": "cairo-1.18.4/COPYING"
+  },
+  {
+    "source_archive": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "archive_sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "archive_member": "cairo-1.18.4/COPYING-LGPL-2.1",
+    "destination": "cairo-1.18.4/COPYING-LGPL-2.1"
+  },
+  {
+    "source_archive": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "archive_sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "archive_member": "cairo-1.18.4/COPYING-MPL-1.1",
+    "destination": "cairo-1.18.4/COPYING-MPL-1.1"
+  },
+  {
+    "source_archive": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "archive_sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "archive_member": "cairo-1.18.4/AUTHORS",
+    "destination": "cairo-1.18.4/AUTHORS"
+  },
+  {
+    "source_archive": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+    "archive_sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+    "archive_member": "cairo-1.18.4/src/cairo.c",
+    "destination": "cairo-1.18.4/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://codeload.github.com/frida/proxy-libintl/tar.gz/refs/tags/0.5",
+    "archive_sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+    "archive_member": "proxy-libintl-0.5/libintl.c",
+    "destination": "proxy-libintl-0.5/copyright-headers.txt"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/build-win64-mxe/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "14267940771c8d285dc1e76929500f16f2dabd569afeb74747fb6663289b39ea",
+    "archive_member": "build-win64-mxe-8.18.6/build/plugins/proxy-libintl/proxy-libintl.mk",
+    "destination": "build-win64-mxe-8.18.6/build/plugins/proxy-libintl/proxy-libintl.mk"
+  },
+  {
+    "source_archive": "https://codeload.github.com/libvips/build-win64-mxe/tar.gz/refs/tags/v8.18.6",
+    "archive_sha256": "14267940771c8d285dc1e76929500f16f2dabd569afeb74747fb6663289b39ea",
+    "archive_member": "build-win64-mxe-8.18.6/build/patches/cairo-1-fixes.patch",
+    "destination": "build-win64-mxe-8.18.6/build/patches/cairo-1-fixes.patch"
+  }
+]

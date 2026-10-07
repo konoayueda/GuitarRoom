@@ -1,0 +1,2 @@
+# Keep upstream license and patch bytes consistent with their SHA-256 manifests.
+licenses/** -text

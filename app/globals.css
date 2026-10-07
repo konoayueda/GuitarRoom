@@ -1029,6 +1029,25 @@ h1 {
 .library-foot button {
   color: #827461;
 }
+.library-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.library-backup-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.library-backup-actions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .empty-state {
   padding: 55px 20px;
   text-align: center;

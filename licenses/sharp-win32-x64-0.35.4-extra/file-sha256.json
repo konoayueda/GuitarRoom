@@ -1,0 +1,297 @@
+[
+  {
+    "file": "archive-manifest.json",
+    "sha256": "c083947f6ca282d20aac78f692ff398ccaa5846cd9ed4708753e798f24535a86",
+    "bytes": 7251
+  },
+  {
+    "file": "collect-upstream.ps1",
+    "sha256": "efd3efdd3f55bef64dc979e5725e645c0b7cbcc5d35dcfaa19ebb2fabcf7a4c4",
+    "bytes": 3534
+  },
+  {
+    "file": "download-manifest.json",
+    "sha256": "a177de743269c561de03b646b22a6f760c230576a707225902652c55d917d3ff",
+    "bytes": 5507
+  },
+  {
+    "file": "extract-upstream.ps1",
+    "sha256": "696e7e4097bacc4501ca14ad957512703a9aa8ce643eb37cade884e40f37a4ad",
+    "bytes": 4957
+  },
+  {
+    "file": "installed-package-README.md",
+    "sha256": "280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13",
+    "bytes": 4913
+  },
+  {
+    "file": "installed-versions.json",
+    "sha256": "d551c859958f06b8088957f679c29be1ff53760191f7401e8183460fc5f58cf4",
+    "bytes": 597
+  },
+  {
+    "file": "README.md",
+    "sha256": "2fa11104ef0f6ef9a5078a34dbed3490abd56d1bcc15f57fd53b637de5bcac1b",
+    "bytes": 5911
+  },
+  {
+    "file": "build-win64-mxe-8.18.6/README.md",
+    "sha256": "b8497d90d55fe7b053e7e290ca80aeafbb811fd347dee7c61b6b8b60fc6b67f9",
+    "bytes": 11708
+  },
+  {
+    "file": "build-win64-mxe-8.18.6/build/patches/cairo-1-fixes.patch",
+    "sha256": "e9fa4176252f278e8d53ca110959797ac7f636da9f8dfb0d8d5b4c2db69b3b08",
+    "bytes": 19182
+  },
+  {
+    "file": "build-win64-mxe-8.18.6/build/plugins/proxy-libintl/proxy-libintl.mk",
+    "sha256": "3322209995d2a56e84998007c6ef8aa7e3d87200490bff1c032e5c6caae04836",
+    "bytes": 675
+  },
+  {
+    "file": "cairo-1.18.4/AUTHORS",
+    "sha256": "7118b55c2d911781622ecb281d9e11fd7eeb5f46c8925e6d740f96f89e79a8fe",
+    "bytes": 8148
+  },
+  {
+    "file": "cairo-1.18.4/COPYING",
+    "sha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf",
+    "bytes": 1576
+  },
+  {
+    "file": "cairo-1.18.4/COPYING-LGPL-2.1",
+    "sha256": "9e9e8608c4cdda51a78cc3a385f4ec9a2e4c96d5ecad74ac8bca5fca3e563b7d",
+    "bytes": 26533
+  },
+  {
+    "file": "cairo-1.18.4/COPYING-MPL-1.1",
+    "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f",
+    "bytes": 25755
+  },
+  {
+    "file": "cairo-1.18.4/copyright-headers.txt",
+    "sha256": "46c0861cfdd55e46fec87148f736f222acfb09c5bbe1e0061856581dd609b084",
+    "bytes": 2155
+  },
+  {
+    "file": "fribidi-1.0.16/AUTHORS",
+    "sha256": "cb173f55c9514c8f38f4647ac3fedd5f8611358d331e65ab955da931e826861c",
+    "bytes": 1640
+  },
+  {
+    "file": "fribidi-1.0.16/COPYING",
+    "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b",
+    "bytes": 26440
+  },
+  {
+    "file": "fribidi-1.0.16/copyright-headers.txt",
+    "sha256": "dd559a0e6d3a20538da95ddb50442dade686f01f09ff79b34285cd44682fa078",
+    "bytes": 1480
+  },
+  {
+    "file": "fribidi-1.0.16/README",
+    "sha256": "3debe734c777df09c3c762cadd0fea1bebdb857c55243d605dc5b09211895bf3",
+    "bytes": 14
+  },
+  {
+    "file": "glib-2.89.4/COPYING",
+    "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+    "bytes": 25967
+  },
+  {
+    "file": "glib-2.89.4/copyright-headers.txt",
+    "sha256": "b93e9606d9a1c50f4e7006c01482c7278942dacd0b2814703e811604f7b478cf",
+    "bytes": 3586
+  },
+  {
+    "file": "glib-2.89.4/README.md",
+    "sha256": "c8d47803738fc68c8fa05735504e4423a2f0844a53c71d07f506985e5db7827e",
+    "bytes": 3248
+  },
+  {
+    "file": "glib-2.89.4/.reuse/dep5",
+    "sha256": "2e79c13df143ec611331d2a963b07f4c6da9fa50d84dd6df5064c2b68faf2db1",
+    "bytes": 2198
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/AFL-2.0.txt",
+    "sha256": "7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde",
+    "bytes": 8987
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/Apache-2.0.txt",
+    "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+    "bytes": 10280
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/CC-BY-SA-3.0.txt",
+    "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f",
+    "bytes": 22240
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/CC0-1.0.txt",
+    "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "bytes": 7048
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/GPL-2.0-or-later.txt",
+    "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+    "bytes": 17337
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/LGPL-2.1-only.txt",
+    "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+    "bytes": 25967
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/LGPL-2.1-or-later.txt",
+    "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+    "bytes": 25967
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/LicenseRef-old-glib-tests.txt",
+    "sha256": "fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914",
+    "bytes": 841
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/LLVM-exception.txt",
+    "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+    "bytes": 919
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/MIT.txt",
+    "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+    "bytes": 1078
+  },
+  {
+    "file": "glib-2.89.4/LICENSES/MPL-1.1.txt",
+    "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795",
+    "bytes": 23669
+  },
+  {
+    "file": "libexif-0.6.26/AUTHORS",
+    "sha256": "a19ef6f43014fc57829658087d0c2bf59d97482e015cf553d7a68124603cbc44",
+    "bytes": 240
+  },
+  {
+    "file": "libexif-0.6.26/COPYING",
+    "sha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89",
+    "bytes": 26434
+  },
+  {
+    "file": "libexif-0.6.26/copyright-headers.txt",
+    "sha256": "a4e580dfa3906c202bc06779b1a5bcceeec201e6ee7d1346e72547b864ffaa59",
+    "bytes": 1748
+  },
+  {
+    "file": "libheif-1.23.2/COPYING",
+    "sha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596",
+    "bytes": 44366
+  },
+  {
+    "file": "libheif-1.23.2/copyright-headers.txt",
+    "sha256": "1c89f8bea2d4dbac8ec1dd1595fa2195db07593040c619042ba1598b1a5d56b7",
+    "bytes": 1517
+  },
+  {
+    "file": "libheif-1.23.2/README.md",
+    "sha256": "822c8eb9e53262f8d3667dadd0b79e8d2666744ecd6a2fcba2e0ade1f1aaf212",
+    "bytes": 19504
+  },
+  {
+    "file": "librsvg-2.62.91/AUTHORS",
+    "sha256": "14e765b9c1097d93f4b842a6ad23172b530cc00dfe7a5aae1b9afefdca54531b",
+    "bytes": 1798
+  },
+  {
+    "file": "librsvg-2.62.91/Cargo.toml",
+    "sha256": "7c68ed69ddfaca59c50d0da1f959e6298a759f0362b24aaed060f92af618d262",
+    "bytes": 3572
+  },
+  {
+    "file": "librsvg-2.62.91/COPYING.LIB",
+    "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+    "bytes": 26530
+  },
+  {
+    "file": "librsvg-2.62.91/copyright-headers.txt",
+    "sha256": "b913e1fd9ec1bcd2310167a3afbba804b178f4dd057432334341019999c4fc09",
+    "bytes": 1238
+  },
+  {
+    "file": "librsvg-2.62.91/README.md",
+    "sha256": "fd05770e1fd2d8ad98a1a7fe6b2012f06824716fe506c94baddc9bc7bc51c641",
+    "bytes": 8379
+  },
+  {
+    "file": "libvips-8.18.6/copyright-headers.txt",
+    "sha256": "5849037bf8492f86aa711a7f2cc53b6ef083fe514dd51be5c284752b58a3baf7",
+    "bytes": 3836
+  },
+  {
+    "file": "libvips-8.18.6/copyright-lines.txt",
+    "sha256": "5fa0937951656fbaad581ad82e05813d36c5f247b982616ba34ad29fc6cf2459",
+    "bytes": 26651
+  },
+  {
+    "file": "libvips-8.18.6/LICENSE",
+    "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+    "bytes": 26530
+  },
+  {
+    "file": "libvips-8.18.6/README.md",
+    "sha256": "e173c8181f47e84df8ae2b7932030d059b73862747bd069fd5cb9e17810466fc",
+    "bytes": 10176
+  },
+  {
+    "file": "libvips-8.18.6/libvips/foreign/libnsgif/COPYING",
+    "sha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c",
+    "bytes": 1133
+  },
+  {
+    "file": "pango-1.58.2/COPYING",
+    "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+    "bytes": 25292
+  },
+  {
+    "file": "pango-1.58.2/copyright-headers.txt",
+    "sha256": "324e73a4f32277fb2c3485dc376cb838e9a35dcda45ef73077130e2813f00218",
+    "bytes": 1757
+  },
+  {
+    "file": "pango-1.58.2/README.md",
+    "sha256": "b502e67df79d3ec97a4fb1b9c0bf062dfd07f334e6aaa92040516a290bd73e0d",
+    "bytes": 3099
+  },
+  {
+    "file": "proxy-libintl-0.5/COPYING",
+    "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+    "bytes": 25292
+  },
+  {
+    "file": "proxy-libintl-0.5/copyright-headers.txt",
+    "sha256": "79edfab613c7bd2f7f62e5dd1e497c907eb23bc680afd85962cc64c537dedace",
+    "bytes": 1665
+  },
+  {
+    "file": "proxy-libintl-0.5/README.md",
+    "sha256": "a0cea22d295c8e9d020f6a8b32936443233b685d314e5ded96296cd92bd421cd",
+    "bytes": 2039
+  },
+  {
+    "file": "terms/GPL-3.0.txt",
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "bytes": 35147
+  },
+  {
+    "file": "terms/LGPL-3.0.txt",
+    "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+    "bytes": 7651
+  },
+  {
+    "file": "terms/MPL-2.0.txt",
+    "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+    "bytes": 16726
+  }
+]

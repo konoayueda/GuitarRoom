@@ -11,6 +11,7 @@ import {
   Play,
   ChevronRight,
   Download,
+  Upload,
   AudioLines,
   FolderHeart,
   FileText,
@@ -56,6 +57,7 @@ import type { Arrangement } from "@/lib/arrangement";
 import ChordLab from "./chord-lab";
 import Metronome from "./metronome";
 import { CHORDS } from "@/lib/chords";
+import type { BackupFingering } from "@/lib/backup";
 const palette = ["clay", "olive", "blue"];
 function Staff({ demoId = 0 }: { demoId?: number }) {
   const names =
@@ -143,6 +145,16 @@ export default function GuitarRoom() {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [exporting, setExporting] = useState(false);
+  const [checkingBackup, setCheckingBackup] = useState(false),
+    [restoring, setRestoring] = useState(false),
+    [restoreError, setRestoreError] = useState("");
+  const [restoreTarget, setRestoreTarget] = useState<{
+    file: File;
+    scores: number;
+    pages: number;
+    fingerings: number;
+  } | null>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
   const [arrangementDrafts, setArrangementDrafts] = useState<
     Record<string, Arrangement>
   >({});
@@ -406,36 +418,65 @@ export default function GuitarRoom() {
     return () => abort.abort();
   }, []);
   async function backup(selection: Score[]) {
+    if (exporting || restoring || checkingBackup) return;
+    if (
+      selection.some((s) => arrangementDrafts[s.id] || recognitionDrafts[s.id])
+    ) {
+      toast.error(
+        "请先保存编排或处理识别草稿，再导出备份；备份只包含已保存的内容。",
+      );
+      return;
+    }
+    if (selection.length > 100) {
+      toast.error("每次备份最多 100 份曲谱，请在阅读器中分批导出单份曲谱。");
+      return;
+    }
     setExporting(true);
-    const tid = toast.loading("正在整理原谱和笔记…");
+    const tid = toast.loading("正在整理原谱、编排和笔记…");
     try {
+      await queue.current.catch(() => {});
       const { default: JSZip } = await import("jszip");
-      const zip = new JSZip();
-      const manifests = [];
-      for (const s of selection) {
+      const { parseBackup, backupFingeringSchema, BACKUP_MAX_BYTES } =
+        await import("@/lib/backup");
+      const zip = new JSZip(),
+        manifests = [];
+      let originalBytes = 0;
+      for (const chosen of selection) {
+        const s = ref.current.find((score) => score.id === chosen.id);
+        if (!s) throw new Error("曲谱库已发生变化，请重新导出备份。");
         const files: Record<string, string> = {};
         for (const p of s.pages) {
-          const identity = p.fileId || p.id;
-          if (files[identity]) continue;
-          const name = p.name.replace(/[\\/:*?"<>|]/g, "_");
-          const path =
-            s.id + "/" + identity + "-" + name + (p.fileId ? "" : ".svg");
+          if (!p.fileId || files[p.fileId]) continue;
+          // Demo scores refer to trusted assets bundled with every local release.
+          const name = p.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_");
+          const path = s.id + "/" + p.fileId + "-" + name;
           const response = await fetch(pageUrl(p));
           if (!response.ok)
             throw new Error("未能读取 " + s.title + " 的原文件，请稍后重试。");
-          zip.file(path, await response.blob());
-          files[identity] = path;
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length > 20 * 1024 * 1024)
+            throw new Error("单份原文件超过 20 MB，暂不能导出为可恢复备份。");
+          originalBytes += bytes.length;
+          if (originalBytes > BACKUP_MAX_BYTES)
+            throw new Error("备份最多 200 MB，请分别导出部分曲谱。");
+          zip.file(path, bytes);
+          files[p.fileId] = path;
         }
         manifests.push({ ...s, backupFiles: files });
       }
+      const fingerings = backupFingeringSchema
+        .array()
+        .max(1000)
+        .parse(await api<BackupFingering[]>("/api/fingerings"));
       zip.file(
         "曲谱与笔记.json",
         JSON.stringify(
           {
             format: "xianjian-backup",
-            version: 1,
+            version: 2,
             exportedAt: new Date().toISOString(),
             scores: manifests,
+            fingerings,
           },
           null,
           2,
@@ -443,19 +484,98 @@ export default function GuitarRoom() {
       );
       zip.file(
         "阅读说明.txt",
-        "备份包含原始曲谱、页序、旋转、标签、批注和笔记。JSON 记录整理信息，原谱可直接打开或重新导入。",
+        "在弦间的曲谱库点击「恢复备份」，选择这份 ZIP。恢复会新增副本，保留现有曲谱；已有相同指型的收藏会保留原内容。备份包含原谱、页序旋转、标签收藏、批注笔记、已保存编排、唱音和歌词，以及收藏指型。未保存草稿不包含在备份中。",
       );
+      const bytes = await zip.generateAsync({
+        type: "uint8array",
+        compression: "STORE",
+      });
+      if (bytes.length > BACKUP_MAX_BYTES)
+        throw new Error("备份最多 200 MB，请分别导出部分曲谱。");
+      // Verify that a downloaded archive can actually be restored, before offering it.
+      await parseBackup(bytes);
       downloadBlob(
-        await zip.generateAsync({ type: "blob", compression: "STORE" }),
+        new Blob([bytes as BlobPart], { type: "application/zip" }),
         "弦间-" +
           (selection.length === 1 ? selection[0].title : "曲谱库") +
           "-备份.zip",
       );
-      toast.success("备份已导出", { id: tid });
+      toast.success("可恢复的完整备份已导出", { id: tid });
     } catch (e) {
       toast.error((e as Error).message, { id: tid });
     } finally {
       setExporting(false);
+    }
+  }
+  async function inspectBackup(file?: File) {
+    if (!file || restoring || checkingBackup || exporting) return;
+    setCheckingBackup(true);
+    setRestoreError("");
+    const tid = toast.loading("正在检查备份，现有曲谱会保留…");
+    try {
+      const { parseBackup, BACKUP_MAX_BYTES } = await import("@/lib/backup");
+      if (file.size > BACKUP_MAX_BYTES)
+        throw new Error("备份文件最多 200 MB，请选择网站导出的 ZIP。");
+      const { manifest } = await parseBackup(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+      setRestoreTarget({
+        file,
+        scores: manifest.scores.length,
+        pages: manifest.scores.reduce((n, s) => n + s.pages.length, 0),
+        fingerings: manifest.fingerings?.length ?? 0,
+      });
+      toast.dismiss(tid);
+    } catch (e) {
+      toast.error((e as Error).message, { id: tid });
+    } finally {
+      setCheckingBackup(false);
+    }
+  }
+  async function recoverBackup() {
+    if (!restoreTarget || restoring) return;
+    setRestoring(true);
+    setRestoreError("");
+    const tid = toast.loading("正在恢复原谱和编排，请保持页面打开…");
+    const task = queue.current
+      .catch(() => {})
+      .then(async () => {
+        const result = await api<{
+          scores: Score[];
+          restoredFingerings: number;
+          skippedFingerings: number;
+        }>("/api/backups", {
+          method: "POST",
+          headers: { "Content-Type": "application/zip" },
+          body: restoreTarget.file,
+        });
+        const restored = result.scores.map(normalizeScore);
+        for (const score of restored) persisted.current.add(score.id);
+        ref.current = [...restored, ...ref.current];
+        setScores(ref.current);
+        setRestoreTarget(null);
+        setFilter("all");
+        setQuery("");
+        setView("library");
+        toast.success(
+          "已恢复 " +
+            restored.length +
+            " 份曲谱、" +
+            result.restoredFingerings +
+            " 个收藏指型" +
+            (result.skippedFingerings ? "；相同指型已保留原收藏" : ""),
+          { id: tid },
+        );
+      });
+    queue.current = task;
+    try {
+      await task;
+    } catch (e) {
+      const message = (e as Error).message;
+      setRestoreError(message);
+      toast.error(message, { id: tid });
+    } finally {
+      setRestoring(false);
     }
   }
   const selected = scores.find((s) => s.id === active);
@@ -874,17 +994,81 @@ export default function GuitarRoom() {
                 <FolderHeart size={16} />
                 原谱与笔记，留在自己的琴房。
               </span>
-              <button
-                disabled={exporting || !scores.length}
-                onClick={() => void backup(scores)}
-              >
-                <Download size={14} />
-                {exporting ? "正在导出…" : "导出备份"}
-              </button>
+              <div className="library-backup-actions">
+                <button
+                  disabled={loading || exporting || checkingBackup || restoring}
+                  onClick={() => void backup(scores)}
+                >
+                  <Download size={14} />
+                  {exporting ? "正在导出…" : "导出备份"}
+                </button>
+                <button
+                  disabled={loading || exporting || checkingBackup || restoring}
+                  onClick={() => backupInput.current?.click()}
+                >
+                  <Upload size={14} />
+                  {checkingBackup
+                    ? "正在检查…"
+                    : restoring
+                      ? "正在恢复…"
+                      : "恢复备份"}
+                </button>
+              </div>
             </div>
           </div>
         )}
       </main>
+      <input
+        ref={backupInput}
+        type="file"
+        accept=".zip,application/zip"
+        className="sr-only"
+        aria-label="选择曲谱备份 ZIP"
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          void inspectBackup(file);
+        }}
+      />
+      <AlertDialog
+        open={!!restoreTarget}
+        onOpenChange={(open) => {
+          if (!open && !restoring) setRestoreTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>从备份恢复曲谱？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {restoreTarget?.file.name} 包含 {restoreTarget?.scores} 份曲谱、
+              {restoreTarget?.pages} 页原谱
+              {restoreTarget?.fingerings
+                ? "，以及 " + restoreTarget.fingerings + " 个收藏指型"
+                : ""}
+              。
+              恢复会新增曲谱副本，不覆盖或删除现有曲谱；已有相同指型的收藏会保留原内容。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {restoreError && (
+            <p className="form-error" role="alert">
+              {restoreError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restoring}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restoring}
+              onClick={(e) => {
+                e.preventDefault();
+                void recoverBackup();
+              }}
+            >
+              {restoring ? "正在恢复…" : "确认恢复备份"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <ImportDialog
         open={importing}
         onOpenChange={setImporting}

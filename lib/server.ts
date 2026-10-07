@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { arrangementSchema } from "./arrangement";
+import { canAccessLocalRoom } from "./local-access";
+import { discardUnreadRequestBody } from "./request-body";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -11,15 +13,15 @@ export class ApiError extends Error {
   }
 }
 export async function owner() {
-  // Login-free access is limited to this local development room. A production
-  // build must never expose the existing private library as a shared account.
   const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "";
   if (
-    process.env.NODE_ENV !== "development" ||
-    !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host)
+    !canAccessLocalRoom(
+      requestHeaders.get("host") ?? "",
+      process.env.NODE_ENV === "development",
+      env.GUITAR_ROOM_LOCAL_APP,
+    )
   )
-    throw new ApiError(403, "当前为免登录的本机琴房，请在本机开发服务中打开。");
+    throw new ApiError(403, "当前为本机琴房，请通过本地启动程序打开。");
   // Reuse the previous local namespace; no records or files need moving.
   return "local_seedy";
 }
@@ -32,7 +34,7 @@ export function bucket() {
     throw new ApiError(503, "文件存储暂时无法连接，请稍后重试。");
   return env.BUCKET;
 }
-export async function safe(action: () => Promise<Response>) {
+export async function safe(action: () => Promise<Response>, req?: Request) {
   try {
     return await action();
   } catch (e) {
@@ -51,6 +53,8 @@ export async function safe(action: () => Promise<Response>) {
       { error: "暂时未能保存，请保留当前内容并重试。" },
       { status: 500 },
     );
+  } finally {
+    await discardUnreadRequestBody(req);
   }
 }
 export function checkOrigin(req: Request) {

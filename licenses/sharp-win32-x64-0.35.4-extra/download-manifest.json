@@ -1,0 +1,140 @@
+[
+  {
+    "file": "terms/LGPL-3.0.txt",
+    "url": "https://www.gnu.org/licenses/lgpl-3.0.txt",
+    "status": "failed",
+    "error": "The SSL connection could not be established, see inner exception."
+  },
+  {
+    "file": "terms/GPL-3.0.txt",
+    "url": "https://www.gnu.org/licenses/gpl-3.0.txt",
+    "status": "failed",
+    "error": "The SSL connection could not be established, see inner exception."
+  },
+  {
+    "file": "terms/MPL-2.0.txt",
+    "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+    "status": "downloaded",
+    "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+  },
+  {
+    "file": "fribidi-1.0.16/COPYING",
+    "url": "https://raw.githubusercontent.com/fribidi/fribidi/v1.0.16/COPYING",
+    "status": "downloaded",
+    "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b"
+  },
+  {
+    "file": "fribidi-1.0.16/AUTHORS",
+    "url": "https://raw.githubusercontent.com/fribidi/fribidi/v1.0.16/AUTHORS",
+    "status": "downloaded",
+    "sha256": "cb173f55c9514c8f38f4647ac3fedd5f8611358d331e65ab955da931e826861c"
+  },
+  {
+    "file": "fribidi-1.0.16/README",
+    "url": "https://raw.githubusercontent.com/fribidi/fribidi/v1.0.16/README",
+    "status": "downloaded",
+    "sha256": "3debe734c777df09c3c762cadd0fea1bebdb857c55243d605dc5b09211895bf3"
+  },
+  {
+    "file": "libexif-0.6.26/COPYING",
+    "url": "https://raw.githubusercontent.com/libexif/libexif/v0.6.26/COPYING",
+    "status": "downloaded",
+    "sha256": "36b6d3fa47916943fd5fec313c584784946047ec1337a78b440e5992cb595f89"
+  },
+  {
+    "file": "libexif-0.6.26/AUTHORS",
+    "url": "https://raw.githubusercontent.com/libexif/libexif/v0.6.26/AUTHORS",
+    "status": "downloaded",
+    "sha256": "a19ef6f43014fc57829658087d0c2bf59d97482e015cf553d7a68124603cbc44"
+  },
+  {
+    "file": "libheif-1.23.2/COPYING",
+    "url": "https://raw.githubusercontent.com/strukturag/libheif/v1.23.2/COPYING",
+    "status": "downloaded",
+    "sha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596"
+  },
+  {
+    "file": "libheif-1.23.2/README.md",
+    "url": "https://raw.githubusercontent.com/strukturag/libheif/v1.23.2/README.md",
+    "status": "downloaded",
+    "sha256": "822c8eb9e53262f8d3667dadd0b79e8d2666744ecd6a2fcba2e0ade1f1aaf212"
+  },
+  {
+    "file": "libvips-8.18.6/COPYING",
+    "url": "https://raw.githubusercontent.com/libvips/libvips/v8.18.6/COPYING",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 404 (Not Found)."
+  },
+  {
+    "file": "libvips-8.18.6/AUTHORS",
+    "url": "https://raw.githubusercontent.com/libvips/libvips/v8.18.6/AUTHORS",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 404 (Not Found)."
+  },
+  {
+    "file": "libvips-8.18.6/README.md",
+    "url": "https://raw.githubusercontent.com/libvips/libvips/v8.18.6/README.md",
+    "status": "downloaded",
+    "sha256": "e173c8181f47e84df8ae2b7932030d059b73862747bd069fd5cb9e17810466fc"
+  },
+  {
+    "file": "proxy-libintl-0.5/COPYING",
+    "url": "https://raw.githubusercontent.com/frida/proxy-libintl/0.5/COPYING",
+    "status": "downloaded",
+    "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+  },
+  {
+    "file": "proxy-libintl-0.5/README.md",
+    "url": "https://raw.githubusercontent.com/frida/proxy-libintl/0.5/README.md",
+    "status": "downloaded",
+    "sha256": "a0cea22d295c8e9d020f6a8b32936443233b685d314e5ded96296cd92bd421cd"
+  },
+  {
+    "file": "glib-2.89.4/LGPL-2.1-or-later.txt",
+    "url": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.4/LICENSES/LGPL-2.1-or-later.txt",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "glib-2.89.4/README.md",
+    "url": "https://gitlab.gnome.org/GNOME/glib/-/raw/2.89.4/README.md",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "pango-1.58.2/COPYING",
+    "url": "https://gitlab.gnome.org/GNOME/pango/-/raw/1.58.2/COPYING",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "pango-1.58.2/AUTHORS",
+    "url": "https://gitlab.gnome.org/GNOME/pango/-/raw/1.58.2/AUTHORS",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "librsvg-2.62.91/COPYING.LIB",
+    "url": "https://gitlab.gnome.org/GNOME/librsvg/-/raw/2.62.91/COPYING.LIB",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "librsvg-2.62.91/COPYING",
+    "url": "https://gitlab.gnome.org/GNOME/librsvg/-/raw/2.62.91/COPYING",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "librsvg-2.62.91/AUTHORS",
+    "url": "https://gitlab.gnome.org/GNOME/librsvg/-/raw/2.62.91/AUTHORS",
+    "status": "failed",
+    "error": "Response status code does not indicate success: 406 (Not Acceptable)."
+  },
+  {
+    "file": "build-win64-mxe-8.18.6/README.md",
+    "url": "https://raw.githubusercontent.com/libvips/build-win64-mxe/v8.18.6/README.md",
+    "status": "downloaded",
+    "sha256": "b8497d90d55fe7b053e7e290ca80aeafbb811fd347dee7c61b6b8b60fc6b67f9"
+  }
+]
