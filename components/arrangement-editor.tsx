@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   type Ref,
   type KeyboardEvent,
+  type MouseEvent,
 } from "react";
 import {
   appendRecognizedSection,
@@ -32,6 +33,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import ScoreNoteTools from "./score-note-tools";
+import { initialArrangementForScore } from "@/lib/score-key";
+import { ScoreContextMenu, type ScoreMenuEntry } from "./score-context-menu";
 import VocalTools from "./vocal-tools";
 import {
   lyricLineCount,
@@ -61,9 +64,10 @@ import {
   type ScorePassage,
 } from "@/lib/score-editing";
 import ChordVoicing from "./chord-voicing-editor";
-import { CHORDS } from "@/lib/chords";
+import { ScoreChordPicker } from "./score-chord-picker";
+import { setScoreChord } from "@/lib/score-chord-edit";
+import { CHORDS, type Chord } from "@/lib/chords";
 import {
-  EMPTY_ARRANGEMENT,
   arrangementSchema,
   arrangementProblems,
   barTicks,
@@ -71,6 +75,7 @@ import {
   durationOptions,
   GRID_OPTIONS,
   beatLabel,
+  durationLabel,
   writtenNotes,
   tieCandidate,
   repairNoteLinks,
@@ -102,7 +107,10 @@ import {
 import type { Score } from "@/lib/models";
 import { Choice, downloadBlob } from "./room-controls";
 import { useArrangementPlayer } from "./arrangement-player";
-import ArrangementPreview, { type ScoreSelection } from "./arrangement-preview";
+import ArrangementPreview, {
+  type ScoreSelection,
+  type ScoreContextTarget,
+} from "./arrangement-preview";
 import { toast } from "sonner";
 
 export type ArrangementEditorHandle = {
@@ -135,7 +143,12 @@ export default function ArrangementEditor({
   active: boolean;
   onPlay: () => void;
 }) {
-  const value = draft ?? score.arrangement ?? EMPTY_ARRANGEMENT;
+  const initialArrangement =
+    score.arrangement ?? initialArrangementForScore(score.key);
+  const value = draft ?? initialArrangement;
+  const [contextTarget, setContextTarget] = useState<ScoreContextTarget | null>(
+    null,
+  );
   const [lane, setLane] = useState<"guitar" | "vocal" | "lyrics">("guitar");
   const [vocalCursor, setVocalCursor] = useState({ barId: "", tick: 0 });
   const [lyricCursor, setLyricCursor] = useState({
@@ -155,6 +168,9 @@ export default function ArrangementEditor({
   const [rangeMode, setRangeMode] = useState(false);
   const [clipboard, setClipboard] = useState<ScorePassage | null>(null);
   const [properties, setProperties] = useState(false);
+  const [chordPickerTarget, setChordPickerTarget] =
+    useState<ScoreSelection | null>(null);
+  const chordPickerTargetRef = useRef<ScoreSelection | null>(null);
   const [help, setHelp] = useState(false);
   const [settings, setSettings] = useState(false);
   const [selected, setSelected] = useState<ScoreSelection>({
@@ -279,8 +295,7 @@ export default function ArrangementEditor({
     if (!coalesce) setHistory((old) => [...old.slice(-29), value]);
     setFuture([]);
     onDraft(
-      JSON.stringify(next) ===
-        JSON.stringify(score.arrangement ?? EMPTY_ARRANGEMENT)
+      JSON.stringify(next) === JSON.stringify(initialArrangement)
         ? undefined
         : next,
     );
@@ -308,8 +323,7 @@ export default function ArrangementEditor({
     setHistory((h) => h.slice(0, -1));
     setFuture((f) => [...f, value]);
     onDraft(
-      JSON.stringify(old) ===
-        JSON.stringify(score.arrangement ?? EMPTY_ARRANGEMENT)
+      JSON.stringify(old) === JSON.stringify(initialArrangement)
         ? undefined
         : old,
     );
@@ -327,8 +341,7 @@ export default function ArrangementEditor({
     setHistory((h) => [...h, value]);
     setFuture((f) => f.slice(0, -1));
     onDraft(
-      JSON.stringify(next) ===
-        JSON.stringify(score.arrangement ?? EMPTY_ARRANGEMENT)
+      JSON.stringify(next) === JSON.stringify(initialArrangement)
         ? undefined
         : next,
     );
@@ -750,6 +763,15 @@ export default function ArrangementEditor({
         );
       }
       setInputDuration(ticks);
+      // Tuplet input needs its own subdivisions; keep existing onsets in place.
+      if (
+        rhythmShape(ticks)?.triplet ||
+        rhythmShape(currentDuration)?.triplet
+      ) {
+        const subdivision = String(Math.min(ticks, 16));
+        if (GRID_OPTIONS.some((option) => option.value === subdivision))
+          setGrid(subdivision);
+      }
       if (targets.length) change(next);
     } catch (error) {
       toast.error((error as Error).message);
@@ -1134,6 +1156,69 @@ export default function ArrangementEditor({
       toast.error("暂时无法启动试听，请检查浏览器的声音设置。");
     }
   }
+  function openChordPicker(target: ScoreSelection) {
+    if (
+      locked ||
+      !bars.some(
+        ({ bar }) =>
+          bar.id === target.barId &&
+          bar.events.some((e) => e.id === target.eventId),
+      )
+    )
+      return;
+    chordPickerTargetRef.current = { ...target };
+    setChordPickerTarget({ ...target });
+    setLane("guitar");
+    setAnchor(null);
+    setRangeMode(false);
+  }
+  function closeChordPicker(open: boolean) {
+    if (open) return;
+    chordPickerTargetRef.current = null;
+    setChordPickerTarget(null);
+  }
+  function applyPickedChord(chord: Chord): boolean {
+    const target = chordPickerTargetRef.current;
+    if (locked || !target) return false;
+    try {
+      const next = setScoreChord(value, target, chord);
+      change(next.arrangement);
+      setSelected(next.cursor);
+      setLane("guitar");
+      return true;
+    } catch (error) {
+      toast.error((error as Error).message);
+      return false;
+    }
+  }
+  function focusAfterChordPicker() {
+    if (locked) return;
+    requestAnimationFrame(() => {
+      if (selected.tick !== undefined && selected.stringIndex !== undefined)
+        restoreFocus();
+      else {
+        const bar = document.querySelector(
+          '[data-preview-bar="' + CSS.escape(selected.barId) + '"]',
+        );
+        const target =
+          bar?.querySelector<SVGGElement>(
+            '[data-score-chord-event="' + CSS.escape(selected.eventId) + '"]',
+          ) ?? bar?.querySelector<SVGGElement>(".score-chord-target");
+        target?.focus({ preventScroll: true });
+      }
+    });
+  }
+  const pickerBar = bars.find(({ bar }) => bar.id === chordPickerTarget?.barId);
+  const pickerEvent = pickerBar?.bar.events.find(
+    (e) => e.id === chordPickerTarget?.eventId,
+  );
+  const pickerOnset =
+    pickerBar && pickerEvent
+      ? pickerBar.bar.events
+          .slice(0, pickerBar.bar.events.indexOf(pickerEvent))
+          .reduce((sum, e) => sum + e.durationTicks, 0) +
+        (chordPickerTarget?.tick ?? 0)
+      : 0;
   function inspector(barId: string) {
     if (!chosen || !event || barId !== selected.barId) return null;
     const noteMode =
@@ -1264,6 +1349,13 @@ export default function ArrangementEditor({
               role="group"
               aria-label="常用和弦"
             >
+              <button
+                aria-label="选择全部和弦"
+                onClick={() => openChordPicker({ barId, eventId: event.id })}
+              >
+                <Plus size={14} />
+                全部和弦…
+              </button>
               {["C", "Am", "G", "D", "Em", "Fmaj7"].map((name) => (
                 <button
                   key={name}
@@ -1459,11 +1551,575 @@ export default function ArrangementEditor({
       </fieldset>
     );
   }
+  function contextSelect(target: ScoreContextTarget) {
+    setContextTarget(target);
+    if (locked) return;
+    if ("selection" in target) {
+      const tick = cursorTick(value, target.selection);
+      // Keep an existing passage when right-clicking inside its selection.
+      if (
+        target.kind === "guitar" &&
+        anchor &&
+        selectionSpan &&
+        tick !== undefined &&
+        tick >= selectionSpan.start &&
+        tick < selectionSpan.end
+      ) {
+        setLane("guitar");
+      } else {
+        setRangeMode(false);
+        setAnchor(null);
+        select(target.selection);
+      }
+    } else if (target.kind === "vocal") selectVocal(target.barId, target.tick);
+    else if (target.kind === "lyrics")
+      selectLyric(target.barId, target.tick, target.verse);
+    else {
+      const bar = bars.find((item) => item.bar.id === target.barId)?.bar;
+      if (bar?.events.length) {
+        setLane("guitar");
+        setSelected({ barId: bar.id, eventId: bar.events[0].id });
+        setAnchor(null);
+        setRangeMode(false);
+      }
+    }
+  }
+  function contextRequest(event: MouseEvent<HTMLDivElement>) {
+    if (
+      !(event.target instanceof Element) ||
+      !event.target.closest(
+        "[data-preview-bar], [data-score-bar-header], [data-staff-start]",
+      )
+    )
+      event.stopPropagation();
+  }
+  function contextFocus() {
+    if (locked || chordPickerTargetRef.current) return;
+    requestAnimationFrame(() => {
+      if (chordPickerTargetRef.current) return;
+      if (contextTarget?.kind === "score")
+        document
+          .querySelector<SVGGElement>(".editable-score [data-tab-clef]")
+          ?.focus({ preventScroll: true });
+      else if (lane === "vocal") focusVocal();
+      else if (lane === "lyrics") {
+        const key = CSS.escape(
+          lyricSelection.barId +
+            ":" +
+            lyricSelection.tick +
+            ":" +
+            lyricSelection.verse,
+        );
+        const target = document.querySelector<HTMLElement | SVGGElement>(
+          `[data-lyric-drag="${key}"], textarea[data-lyric-cell="${key}"]`,
+        );
+        target?.focus({ preventScroll: true });
+      } else if (selected.tick !== undefined) restoreFocus();
+      else {
+        const bar = document.querySelector(
+          `[data-preview-bar="${CSS.escape(selected.barId)}"]`,
+        );
+        bar
+          ?.querySelector<SVGGElement>(
+            ".score-diagram-target, .score-chord-target",
+          )
+          ?.focus({ preventScroll: true });
+      }
+    });
+  }
+  const contextBarId =
+    contextTarget && "selection" in contextTarget
+      ? contextTarget.selection.barId
+      : contextTarget?.barId;
+  const contextBar = bars.find((item) => item.bar.id === contextBarId);
+  const contextKind = contextTarget?.kind;
+  const contextDuration =
+    contextKind === "vocal" ? voiceDuration : currentDuration;
+  const contextShape = rhythmShape(contextDuration);
+  const contextBase = contextShape?.base ?? 12;
+  const contextDotted =
+    contextBase *
+    (contextShape?.dots === 0 ? 1.5 : contextShape?.dots === 1 ? 1.75 : 1);
+  const contextTriplet = contextShape?.triplet
+    ? contextBase
+    : (contextBase * 2) / 3;
+  const menuItem = (
+    id: string,
+    label: string,
+    onSelect: () => void,
+    disabled = false,
+    checked?: boolean,
+  ): ScoreMenuEntry => ({
+    id,
+    label,
+    onSelect,
+    disabled: locked || disabled,
+    checked,
+  });
+  const contextGroups: ScoreMenuEntry[][] = [];
+  const contextChordCursor =
+    contextTarget && "selection" in contextTarget
+      ? contextTarget.selection
+      : contextBar?.bar.events[0]
+        ? { barId: contextBar.bar.id, eventId: contextBar.bar.events[0].id }
+        : undefined;
+  const contextChordEvent = contextBar?.bar.events.find(
+    (e) => e.id === contextChordCursor?.eventId,
+  );
+  if (
+    contextKind === "guitar" ||
+    contextKind === "chord" ||
+    contextKind === "bar"
+  ) {
+    contextGroups.push([
+      menuItem(
+        "chord-add",
+        contextChordEvent?.chord && !(contextChordCursor?.tick ?? 0)
+          ? "更换和弦…"
+          : "添加和弦…",
+        () => {
+          if (contextChordCursor) openChordPicker(contextChordCursor);
+        },
+        !contextChordCursor,
+      ),
+    ]);
+  }
+  if (contextKind === "guitar" || contextKind === "vocal") {
+    const setDuration =
+      contextKind === "vocal" ? voiceDurationChange : applyDuration;
+    contextGroups.push([
+      {
+        id: "duration",
+        label: "音符时值",
+        disabled: locked,
+        children: [96, 48, 24, 12, 6, 3].map((ticks) =>
+          menuItem(
+            "duration-" + ticks,
+            durationLabel(ticks),
+            () => setDuration(ticks),
+            false,
+            contextDuration === ticks,
+          ),
+        ),
+      },
+      {
+        ...menuItem(
+          "dot",
+          "附点 / 复附点",
+          () => setDuration(contextDotted),
+          !Number.isInteger(contextDotted) || contextDotted > 96,
+          !!contextShape?.dots,
+        ),
+        shortcut: ".",
+      },
+      {
+        ...menuItem(
+          "triplet",
+          "三连音",
+          () => setDuration(contextTriplet),
+          contextTriplet < 2 || contextTriplet > 96,
+          !!contextShape?.triplet,
+        ),
+        shortcut: "/",
+      },
+    ]);
+    if (contextKind === "guitar") {
+      contextGroups.push([
+        {
+          ...menuItem(
+            "tie",
+            "延音到后音",
+            toggleTie,
+            !currentNote,
+            !!currentNote?.tieToNext,
+          ),
+          shortcut: "L",
+        },
+        {
+          ...menuItem(
+            "previous-tie",
+            "接到前音",
+            togglePreviousTie,
+            !currentNote,
+            previousTied,
+          ),
+          shortcut: "Shift+L",
+        },
+        menuItem("chord-note", "× 按当前和弦拨弦", () =>
+          putChordNote(selected),
+        ),
+        {
+          ...menuItem(
+            "rest",
+            anchor ? "选中片段设为休止" : "当前时值设为休止",
+            rest,
+          ),
+          shortcut: "R",
+        },
+        {
+          ...menuItem(
+            "clear-note",
+            anchor ? "清除选中片段" : "清除这个单音",
+            () => {
+              if (anchor && selectionSpan)
+                change(clearPassage(value, selectionSpan));
+              else putNote(selected, null);
+            },
+            !currentNote && !anchor,
+          ),
+          danger: true,
+          shortcut: "Delete",
+        },
+      ]);
+      contextGroups.push([
+        {
+          ...menuItem(
+            "copy",
+            "复制片段",
+            () => copy(),
+            currentTick === undefined,
+          ),
+          shortcut: "Ctrl+C",
+        },
+        {
+          ...menuItem(
+            "cut",
+            "剪切片段",
+            () => copy(true),
+            currentTick === undefined,
+          ),
+          shortcut: "Ctrl+X",
+        },
+        {
+          ...menuItem(
+            "paste",
+            "覆盖粘贴",
+            paste,
+            !clipboard || currentTick === undefined,
+          ),
+          shortcut: "Ctrl+V",
+        },
+      ]);
+    } else {
+      contextGroups.push([
+        {
+          id: "vocal-pitch",
+          label: "唱音 / 休止",
+          disabled: locked,
+          children: Array.from({ length: 8 }, (_, degree) =>
+            menuItem(
+              "vocal-degree-" + degree,
+              degree === 0 ? "0 · 休止" : String(degree),
+              () => writeVocal({ degree }),
+              false,
+              selectedVocal?.degree === degree,
+            ),
+          ),
+        },
+        menuItem(
+          "octave-up",
+          "升高一个八度",
+          () =>
+            writeVocal({
+              octave: Math.min(2, (selectedVocal?.octave ?? 0) + 1),
+            }),
+          (selectedVocal?.octave ?? 0) >= 2 || selectedVocal?.degree === 0,
+        ),
+        menuItem(
+          "octave-down",
+          "降低一个八度",
+          () =>
+            writeVocal({
+              octave: Math.max(-2, (selectedVocal?.octave ?? 0) - 1),
+            }),
+          (selectedVocal?.octave ?? 0) <= -2 || selectedVocal?.degree === 0,
+        ),
+        {
+          ...menuItem(
+            "tie",
+            "延音到后音",
+            voiceTie,
+            !selectedVocal || selectedVocal.degree === 0,
+            !!selectedVocal?.tieToNext,
+          ),
+          shortcut: "L",
+        },
+        menuItem("nudge-earlier", "提前一个八分音符", () => nudgeLane(-12)),
+        menuItem("nudge-later", "延后一个八分音符", () => nudgeLane(12)),
+        {
+          ...menuItem(
+            "vocal-clear",
+            "清除这个唱音",
+            () => {
+              change(
+                deleteVocalNote(value, vocalCursor.barId, vocalCursor.tick),
+              );
+            },
+            !selectedVocal,
+          ),
+          danger: true,
+          shortcut: "Delete",
+        },
+      ]);
+    }
+  } else if (contextKind === "lyrics") {
+    contextGroups.push([
+      menuItem("lyric-edit", "填写 / 修改歌词", () => {
+        requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLTextAreaElement>(
+              `textarea[data-lyric-cell="${CSS.escape(lyricSelection.barId + ":" + lyricSelection.tick + ":" + lyricSelection.verse)}"]`,
+            )
+            ?.focus({ preventScroll: true }),
+        );
+      }),
+      menuItem(
+        "lyric-add-line",
+        "增加一行歌词",
+        () => {
+          change(addLyricLine(value));
+          setLyricCursor({ ...lyricSelection, verse: lines });
+        },
+        lines >= 8,
+      ),
+      menuItem(
+        "lyric-anchor-auto",
+        "歌词跟随唱音",
+        () => lyricAnchorChange("auto"),
+        false,
+        (selectedLyric?.anchorMode ?? lyricEntryMode) === "auto",
+      ),
+      menuItem(
+        "lyric-anchor-free",
+        "歌词独立起唱",
+        () => lyricAnchorChange("free"),
+        false,
+        (selectedLyric?.anchorMode ?? lyricEntryMode) === "free",
+      ),
+    ]);
+    contextGroups.push([
+      menuItem(
+        "lyric-mode-time",
+        "调整起唱时间",
+        () => setLyricMode("time"),
+        false,
+        lyricMode === "time",
+      ),
+      menuItem(
+        "lyric-mode-layout",
+        "调整文字排版",
+        () => setLyricMode("layout"),
+        false,
+        lyricMode === "layout",
+      ),
+      menuItem(
+        "nudge-earlier",
+        "提前一个八分音符",
+        () => nudgeLane(-12),
+        !selectedLyric,
+      ),
+      menuItem(
+        "nudge-later",
+        "延后一个八分音符",
+        () => nudgeLane(12),
+        !selectedLyric,
+      ),
+      menuItem(
+        "lyric-reset-layout",
+        "重置文字位置",
+        () =>
+          layoutLyric(
+            lyricSelection.barId,
+            lyricSelection.verse,
+            lyricSelection.tick,
+            0,
+            0,
+          ),
+        !selectedLyric,
+      ),
+      {
+        ...menuItem(
+          "lyric-clear",
+          "清除这个歌词",
+          () =>
+            editLyric(
+              lyricSelection.barId,
+              lyricSelection.tick,
+              lyricSelection.verse,
+              "",
+            ),
+          !selectedLyric,
+        ),
+        danger: true,
+      },
+    ]);
+  } else if (contextKind === "score") {
+    contextGroups.push([
+      {
+        id: "meter",
+        label: "拍号",
+        disabled: locked,
+        children: (["4/4", "3/4", "6/8"] as const).map((meter) =>
+          menuItem(
+            "meter-" + meter.replace("/", "-"),
+            meter,
+            () => change({ ...value, meter }),
+            false,
+            value.meter === meter,
+          ),
+        ),
+      },
+      {
+        id: "vocal-key",
+        label: "唱音调号 · 1 = " + (value.vocalKey ?? "C"),
+        disabled: locked,
+        children: (
+          [
+            "C",
+            "C#",
+            "D",
+            "Eb",
+            "E",
+            "F",
+            "F#",
+            "G",
+            "Ab",
+            "A",
+            "Bb",
+            "B",
+          ] as const
+        ).map((key) =>
+          menuItem(
+            "vocal-key-" + key,
+            "1 = " + key,
+            () => change({ ...value, vocalKey: key }),
+            false,
+            (value.vocalKey ?? "C") === key,
+          ),
+        ),
+      },
+    ]);
+  } else if (contextKind === "chord") {
+    contextGroups.push([
+      menuItem("properties", "编辑和弦与按法", () => setProperties(true)),
+      menuItem(
+        "split",
+        "拆分这段和弦",
+        split,
+        !event || event.durationTicks < 2,
+      ),
+      menuItem(
+        "chord-pluck",
+        "同时拨弦",
+        () => editEvent({ stroke: "pluck" }),
+        false,
+        event?.stroke === "pluck",
+      ),
+      menuItem(
+        "chord-down",
+        "向下扫弦",
+        () => editEvent({ stroke: "down" }),
+        false,
+        (event?.stroke ?? (value.pattern === "strum" ? "down" : "pluck")) ===
+          "down",
+      ),
+      menuItem(
+        "chord-up",
+        "向上扫弦",
+        () => editEvent({ stroke: "up" }),
+        false,
+        event?.stroke === "up",
+      ),
+    ]);
+  }
+  if (contextBar && contextKind !== "score") {
+    contextGroups.push([
+      menuItem(
+        "bar-insert",
+        "后面插入空白小节",
+        () => barAction(contextBar.bar.id, "insert"),
+        bars.length >= 128 || contextBar.section.bars.length >= 32,
+      ),
+      menuItem(
+        "bar-copy",
+        "复制这个小节",
+        () => barAction(contextBar.bar.id, "copy"),
+        bars.length >= 128 || contextBar.section.bars.length >= 32,
+      ),
+      {
+        ...menuItem("bar-delete", "删除这个小节", () =>
+          barAction(contextBar.bar.id, "delete"),
+        ),
+        danger: true,
+      },
+    ]);
+  }
+  contextGroups.push([
+    { ...menuItem("undo", "撤销", undo, !history.length), shortcut: "Ctrl+Z" },
+    {
+      ...menuItem("redo", "重做", redo, !future.length),
+      shortcut: "Ctrl+Shift+Z",
+    },
+  ]);
+  const contextOnset =
+    contextTarget && "selection" in contextTarget
+      ? cursorTick(value, contextTarget.selection)
+      : contextTarget && "tick" in contextTarget
+        ? contextTarget.tick
+        : undefined;
+  const contextDetail =
+    contextOnset === undefined
+      ? ""
+      : " · " +
+        beatLabel(contextOnset % limit, value.meter) +
+        (contextTarget?.kind === "guitar" &&
+        contextTarget.selection.stringIndex !== undefined
+          ? " · " + (6 - contextTarget.selection.stringIndex) + " 弦"
+          : "");
+  const contextLabel =
+    contextKind === "score"
+      ? "谱首 · 拍号与唱音调号" + (locked ? "（停止试听或保存后可编辑）" : "")
+      : "第 " +
+        (contextBar?.number ?? "—") +
+        " 小节 · " +
+        (contextKind === "guitar"
+          ? anchor
+            ? "已选片段"
+            : "吉他音符"
+          : contextKind === "vocal"
+            ? "唱音简谱"
+            : contextKind === "lyrics"
+              ? "第 " + (lyricSelection.verse + 1) + " 行歌词"
+              : contextKind === "chord"
+                ? "和弦"
+                : "小节") +
+        contextDetail +
+        (locked ? "（停止试听或保存后可编辑）" : "");
+
   return (
     <div
       className="arrangement-editor direct-arrangement gp-arrangement"
       onKeyDown={editorKey}
     >
+      <ScoreChordPicker
+        open={!!chordPickerTarget}
+        onOpenChange={closeChordPicker}
+        onSelect={applyPickedChord}
+        currentChord={pickerEvent?.chord}
+        customChords={bars.flatMap(({ bar }) =>
+          bar.events.flatMap((event) => (event.chord ? [event.chord] : [])),
+        )}
+        disabled={locked}
+        targetLabel={
+          pickerBar
+            ? "第 " +
+              pickerBar.number +
+              " 小节 · " +
+              beatLabel(pickerOnset, value.meter)
+            : undefined
+        }
+        onCloseAutoFocus={focusAfterChordPicker}
+      />
       <div className="gp-editor-header">
         <div className="score-editor-toolbar">
           <div className="score-editor-title">
@@ -1820,7 +2476,10 @@ export default function ArrangementEditor({
               className="button secondary-button"
               disabled={locked}
               onClick={() =>
-                change(sampleArrangement(score.demoId!, currentPageId))
+                change({
+                  ...sampleArrangement(score.demoId!, currentPageId),
+                  vocalKey: value.vocalKey ?? "C",
+                })
               }
             >
               载入示范和弦编排
@@ -1836,199 +2495,219 @@ export default function ArrangementEditor({
           }
         >
           <div className="gp-score-paper">
-            <ArrangementPreview
-              arrangement={value}
-              title={score.title}
-              capo={score.capo}
-              position={player.position}
-              editing={{
-                gridStep: Number(grid),
-                selected,
-                locked,
-                onSelect: select,
-                onKey: noteKey,
-                inspector: () => null,
-                onLyricChange: editLyric,
-                lyricSelected: lane === "lyrics" ? lyricSelection : undefined,
-                onLyricSelect: selectLyric,
-                onLyricMove: moveLyric,
-                lyricActive: lane === "lyrics",
-                lyricMode,
-                onLyricLayout: layoutLyric,
-                vocalActive: lane === "vocal",
-                vocalSelected: lane === "vocal" ? vocalCursor : undefined,
-                onVocalSelect: selectVocal,
-                onVocalKey: vocalKey,
-                onLyricBegin: (barId, tick, verse) => {
-                  lyricSession.current = {
-                    key: barId + ":" + tick + ":" + verse,
-                    changed: false,
-                  };
-                },
-                range: anchor ? selectionSpan : undefined,
-                sectionHeading: (id, si) => {
-                  const section = value.sections[si];
-                  return (
-                    <fieldset
-                      disabled={locked}
-                      className="score-section-heading"
-                    >
-                      <span className="section-letter">
-                        {String.fromCharCode(65 + si)}
-                      </span>
-                      <input
-                        aria-label={`段落 ${si + 1} 名称`}
-                        maxLength={30}
-                        value={section.label}
-                        onChange={(e) =>
-                          change({
-                            ...value,
-                            sections: value.sections.map((s) =>
-                              s.id === id ? { ...s, label: e.target.value } : s,
-                            ),
-                          })
-                        }
-                      />
-                      <Choice
-                        label={`段落 ${si + 1} 播放遍数`}
-                        value={String(section.repeat)}
-                        onChange={(v) =>
-                          change({
-                            ...value,
-                            sections: value.sections.map((s) =>
-                              s.id === id ? { ...s, repeat: Number(v) } : s,
-                            ),
-                          })
-                        }
-                        options={Array.from({ length: 8 }, (_, i) => ({
-                          value: String(i + 1),
-                          label: `播放 ${i + 1} 遍`,
-                        }))}
-                      />
-                      <div className="score-section-actions">
-                        <button
-                          className="icon-button"
-                          disabled={si === 0}
-                          aria-label={`上移段落 ${si + 1}`}
-                          onClick={() => {
-                            const next = [...value.sections];
-                            [next[si - 1], next[si]] = [next[si], next[si - 1]];
-                            change({ ...value, sections: next });
-                          }}
-                        >
-                          <ArrowUp size={14} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          disabled={si === value.sections.length - 1}
-                          aria-label={`下移段落 ${si + 1}`}
-                          onClick={() => {
-                            const next = [...value.sections];
-                            [next[si], next[si + 1]] = [next[si + 1], next[si]];
-                            change({ ...value, sections: next });
-                          }}
-                        >
-                          <ArrowDown size={14} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          aria-label={`删除段落 ${si + 1}`}
-                          onClick={() =>
+            <ScoreContextMenu
+              label={contextLabel}
+              groups={contextGroups}
+              onContextMenu={contextRequest}
+              onClose={contextFocus}
+            >
+              <ArrangementPreview
+                arrangement={value}
+                title={score.title}
+                capo={score.capo}
+                position={player.position}
+                editing={{
+                  onContextMenu: contextSelect,
+                  onChordAdd: (target) => {
+                    setSelected(target);
+                    openChordPicker(target);
+                  },
+                  gridStep: Number(grid),
+                  selected,
+                  locked,
+                  onSelect: select,
+                  onKey: noteKey,
+                  inspector: () => null,
+                  onLyricChange: editLyric,
+                  lyricSelected: lane === "lyrics" ? lyricSelection : undefined,
+                  onLyricSelect: selectLyric,
+                  onLyricMove: moveLyric,
+                  lyricActive: lane === "lyrics",
+                  lyricMode,
+                  onLyricLayout: layoutLyric,
+                  vocalActive: lane === "vocal",
+                  vocalSelected: lane === "vocal" ? vocalCursor : undefined,
+                  onVocalSelect: selectVocal,
+                  onVocalKey: vocalKey,
+                  onLyricBegin: (barId, tick, verse) => {
+                    lyricSession.current = {
+                      key: barId + ":" + tick + ":" + verse,
+                      changed: false,
+                    };
+                  },
+                  range: anchor ? selectionSpan : undefined,
+                  sectionHeading: (id, si) => {
+                    const section = value.sections[si];
+                    return (
+                      <fieldset
+                        disabled={locked}
+                        className="score-section-heading"
+                      >
+                        <span className="section-letter">
+                          {String.fromCharCode(65 + si)}
+                        </span>
+                        <input
+                          aria-label={`段落 ${si + 1} 名称`}
+                          maxLength={30}
+                          value={section.label}
+                          onChange={(e) =>
                             change({
                               ...value,
-                              sections: value.sections.filter(
-                                (s) => s.id !== id,
+                              sections: value.sections.map((s) =>
+                                s.id === id
+                                  ? { ...s, label: e.target.value }
+                                  : s,
                               ),
                             })
                           }
+                        />
+                        <Choice
+                          label={`段落 ${si + 1} 播放遍数`}
+                          value={String(section.repeat)}
+                          onChange={(v) =>
+                            change({
+                              ...value,
+                              sections: value.sections.map((s) =>
+                                s.id === id ? { ...s, repeat: Number(v) } : s,
+                              ),
+                            })
+                          }
+                          options={Array.from({ length: 8 }, (_, i) => ({
+                            value: String(i + 1),
+                            label: `播放 ${i + 1} 遍`,
+                          }))}
+                        />
+                        <div className="score-section-actions">
+                          <button
+                            className="icon-button"
+                            disabled={si === 0}
+                            aria-label={`上移段落 ${si + 1}`}
+                            onClick={() => {
+                              const next = [...value.sections];
+                              [next[si - 1], next[si]] = [
+                                next[si],
+                                next[si - 1],
+                              ];
+                              change({ ...value, sections: next });
+                            }}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            disabled={si === value.sections.length - 1}
+                            aria-label={`下移段落 ${si + 1}`}
+                            onClick={() => {
+                              const next = [...value.sections];
+                              [next[si], next[si + 1]] = [
+                                next[si + 1],
+                                next[si],
+                              ];
+                              change({ ...value, sections: next });
+                            }}
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            aria-label={`删除段落 ${si + 1}`}
+                            onClick={() =>
+                              change({
+                                ...value,
+                                sections: value.sections.filter(
+                                  (s) => s.id !== id,
+                                ),
+                              })
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </fieldset>
+                    );
+                  },
+                  sectionEnd: (id) => {
+                    const section = value.sections.find((s) => s.id === id)!;
+                    return (
+                      <button
+                        className="score-add-bar"
+                        disabled={
+                          locked ||
+                          section.bars.length >= 32 ||
+                          bars.length >= 128
+                        }
+                        onClick={() =>
+                          barAction(section.bars.at(-1)!.id, "insert")
+                        }
+                      >
+                        <Plus size={18} />
+                        <span>添加小节</span>
+                      </button>
+                    );
+                  },
+                  barTools: (barId) => {
+                    const item = bars.find((b) => b.bar.id === barId)!;
+                    const index = item.section.bars.findIndex(
+                      (b) => b.id === barId,
+                    );
+                    return (
+                      <div className="score-bar-actions">
+                        <button
+                          title="前移小节"
+                          aria-label={`前移第 ${item.number} 小节`}
+                          disabled={locked || index === 0}
+                          onClick={() => barAction(barId, "left")}
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <button
+                          title="后移小节"
+                          aria-label={`后移第 ${item.number} 小节`}
+                          disabled={
+                            locked || index === item.section.bars.length - 1
+                          }
+                          onClick={() => barAction(barId, "right")}
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                        <button
+                          title="在后面插入小节"
+                          aria-label={`在第 ${item.number} 小节后插入`}
+                          disabled={
+                            locked ||
+                            bars.length >= 128 ||
+                            item.section.bars.length >= 32
+                          }
+                          onClick={() => barAction(barId, "insert")}
+                        >
+                          <Plus size={14} />
+                        </button>
+                        <button
+                          title="复制小节"
+                          aria-label={`复制第 ${item.number} 小节`}
+                          disabled={
+                            locked ||
+                            bars.length >= 128 ||
+                            item.section.bars.length >= 32
+                          }
+                          onClick={() => barAction(barId, "copy")}
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button
+                          title="删除小节"
+                          aria-label={`删除第 ${item.number} 小节`}
+                          disabled={locked}
+                          onClick={() => barAction(barId, "delete")}
                         >
                           <Trash2 size={14} />
                         </button>
                       </div>
-                    </fieldset>
-                  );
-                },
-                sectionEnd: (id) => {
-                  const section = value.sections.find((s) => s.id === id)!;
-                  return (
-                    <button
-                      className="score-add-bar"
-                      disabled={
-                        locked ||
-                        section.bars.length >= 32 ||
-                        bars.length >= 128
-                      }
-                      onClick={() =>
-                        barAction(section.bars.at(-1)!.id, "insert")
-                      }
-                    >
-                      <Plus size={18} />
-                      <span>添加小节</span>
-                    </button>
-                  );
-                },
-                barTools: (barId) => {
-                  const item = bars.find((b) => b.bar.id === barId)!;
-                  const index = item.section.bars.findIndex(
-                    (b) => b.id === barId,
-                  );
-                  return (
-                    <div className="score-bar-actions">
-                      <button
-                        title="前移小节"
-                        aria-label={`前移第 ${item.number} 小节`}
-                        disabled={locked || index === 0}
-                        onClick={() => barAction(barId, "left")}
-                      >
-                        <ChevronLeft size={14} />
-                      </button>
-                      <button
-                        title="后移小节"
-                        aria-label={`后移第 ${item.number} 小节`}
-                        disabled={
-                          locked || index === item.section.bars.length - 1
-                        }
-                        onClick={() => barAction(barId, "right")}
-                      >
-                        <ChevronRight size={14} />
-                      </button>
-                      <button
-                        title="在后面插入小节"
-                        aria-label={`在第 ${item.number} 小节后插入`}
-                        disabled={
-                          locked ||
-                          bars.length >= 128 ||
-                          item.section.bars.length >= 32
-                        }
-                        onClick={() => barAction(barId, "insert")}
-                      >
-                        <Plus size={14} />
-                      </button>
-                      <button
-                        title="复制小节"
-                        aria-label={`复制第 ${item.number} 小节`}
-                        disabled={
-                          locked ||
-                          bars.length >= 128 ||
-                          item.section.bars.length >= 32
-                        }
-                        onClick={() => barAction(barId, "copy")}
-                      >
-                        <Copy size={14} />
-                      </button>
-                      <button
-                        title="删除小节"
-                        aria-label={`删除第 ${item.number} 小节`}
-                        disabled={locked}
-                        onClick={() => barAction(barId, "delete")}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  );
-                },
-              }}
-            />
+                    );
+                  },
+                }}
+              />
+            </ScoreContextMenu>
             <button
               className="button secondary-button score-add-section"
               disabled={

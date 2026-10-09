@@ -14,12 +14,12 @@ import { Choice } from "./room-controls";
 import ArrangementPreview from "./arrangement-preview";
 import { useArrangementPlayer } from "./arrangement-player";
 import {
-  EMPTY_ARRANGEMENT,
   arrangementSchema,
   arrangementProblems,
   listBars,
   type Arrangement,
 } from "@/lib/arrangement";
+import { initialArrangementForScore } from "@/lib/score-key";
 import type { Score } from "@/lib/models";
 import { toast } from "sonner";
 export default function ArrangementReader({
@@ -37,7 +37,8 @@ export default function ArrangementReader({
   stopPlayback: boolean;
   onPlay: () => void;
 }) {
-  const value = draft ?? score.arrangement ?? EMPTY_ARRANGEMENT;
+  const value =
+    draft ?? score.arrangement ?? initialArrangementForScore(score.key);
   const [part, setPart] = useState<"both" | "guitar" | "vocal">("both");
   const [zoom, setZoom] = useState("100"),
     [loop, setLoop] = useState(false),

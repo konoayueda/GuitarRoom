@@ -465,17 +465,22 @@ function beamGroups(items: VocalItem[], meter: Arrangement["meter"]) {
   const groups: VocalItem[][] = [];
   let current: VocalItem[] = [];
   const pulse = meter === "6/8" ? 36 : 24;
+  const tuplets = new Map<VocalItem, object>();
+  for (const group of tupletGroups(items)) {
+    group.items.forEach((item) => tuplets.set(item, group));
+  }
   for (const item of items) {
     const previous = current.at(-1);
-    const span = item.shape?.triplet ? item.note.durationTicks * 3 : pulse;
     const connected =
       previous &&
       item.shape &&
       item.shape.beams > 0 &&
       previous.note.tick + previous.note.durationTicks === item.note.tick &&
       previous.shape?.triplet === item.shape.triplet &&
-      Math.floor(previous.note.tick / span) ===
-        Math.floor(item.note.tick / span);
+      (item.shape.triplet
+        ? tuplets.get(previous) === tuplets.get(item)
+        : Math.floor(previous.note.tick / pulse) ===
+          Math.floor(item.note.tick / pulse));
     if (!connected && current.length) {
       groups.push(current);
       current = [];
@@ -497,15 +502,14 @@ function tupletGroups(items: VocalItem[]) {
         items.filter(
           (candidate) =>
             candidate.shape?.triplet &&
+            !used.has(candidate.note.id) &&
             candidate.note.durationTicks === item.note.durationTicks &&
             candidate.note.tick ===
               item.note.tick + offset * item.note.durationTicks,
         ),
       ),
     ];
-    const complete =
-      item.note.tick % (item.note.durationTicks * 3) === 0 &&
-      three.length === 3;
+    const complete = three.length === 3;
     const group = complete ? three : [item];
     group.forEach(({ note }) => used.add(note.id));
     groups.push({ items: group, complete });

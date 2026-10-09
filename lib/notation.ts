@@ -99,20 +99,66 @@ export function barRhythm(
   // notes get separate lanes instead of silently adopting the first duration.
   const primary = items.filter((n) => n.lane === 0),
     rests: RhythmItem[] = [];
-  // Tuplet silence belongs only to a window introduced by an actual tuplet note.
-  const windows = primary
-    .filter((item) => item.shape?.triplet)
-    .map((item) => {
-      const span = item.duration * 3,
-        start = Math.floor(item.tick / span) * span;
-      return { start, end: Math.min(limit, start + span), step: item.duration };
-    });
+  // Tuplets can start between beats. Infer their windows from the written voice,
+  // retaining a metrical window only when its existing notes fit that lattice.
+  const windows: { start: number; end: number; step: number; lane: number }[] = [];
+  for (const item of items) {
+    if (!item.shape?.triplet) continue;
+    const step = item.duration,
+      span = step * 3,
+      voice = items.filter((n) => n.lane === item.lane),
+      fits = (n: RhythmItem, start: number) =>
+        n.shape?.triplet &&
+        n.duration === step &&
+        (n.tick - start) % step === 0;
+    if (
+      windows.some(
+        (w) =>
+          w.lane === item.lane &&
+          w.step === step &&
+          item.tick >= w.start &&
+          item.tick < w.end &&
+          fits(item, w.start),
+      )
+    )
+      continue;
+    const metricalStart = Math.floor(item.tick / span) * span,
+      metricalEnd = Math.min(limit, metricalStart + span),
+      threeNotes = [1, 2].every((offset) =>
+        voice.some(
+          (n) => n.tick === item.tick + offset * step && fits(n, item.tick),
+        ),
+      ),
+      metricalFits =
+        fits(item, metricalStart) &&
+        windows.every(
+          (w) =>
+            w.lane !== item.lane ||
+            w.end <= metricalStart ||
+            w.start >= metricalEnd,
+        ) &&
+        voice.every(
+          (n) =>
+            n.tick >= metricalEnd ||
+            n.tick + n.duration <= metricalStart ||
+            fits(n, metricalStart),
+        ),
+      start = threeNotes || !metricalFits ? item.tick : metricalStart;
+    let end = Math.min(limit, start + span);
+    const conflict = voice.find(
+      (n) => n.tick >= start && n.tick < end && !fits(n, start),
+    );
+    if (conflict) end = conflict.tick;
+    windows.push({ start, end, step, lane: item.lane });
+  }
   const pulse = meter === "6/8" ? 36 : 24;
   function silence(start: number, end: number) {
     while (start < end) {
-      const window = windows.find((w) => start >= w.start && start < w.end);
+      const window = windows.find(
+        (w) => w.lane === 0 && start >= w.start && start < w.end,
+      );
       const nextWindow = windows
-        .filter((w) => w.start > start)
+        .filter((w) => w.lane === 0 && w.start > start)
         .reduce((n, w) => Math.min(n, w.start), end);
       const boundary = Math.min(
         end,
@@ -125,11 +171,13 @@ export function barRhythm(
         start + window.step <= boundary;
       const values =
         meter === "6/8" ? [36, 24, 18, 12, 6, 3, 1] : [24, 12, 6, 3, 1];
+      const remainder = boundary - start,
+        exact = window && rhythmShape(remainder);
       const duration = inTuplet
         ? window!.step
-        : values.find(
-            (v) => v <= boundary - start && (start % pulse) % v === 0,
-          )!;
+        : exact
+          ? remainder
+          : values.find((v) => v <= remainder && (start % pulse) % v === 0)!;
       rests.push({
         tick: start,
         duration,
@@ -150,25 +198,25 @@ export function barRhythm(
   items.push(...rests);
   items.sort((a, b) => a.lane - b.lane || a.tick - b.tick);
   const tuplets: { items: RhythmItem[]; complete: boolean }[] = [];
-  const used = new Set<RhythmItem>();
-  for (const item of items) {
-    if (!item.shape?.triplet || used.has(item)) continue;
-    const three = [
-      item,
-      ...[1, 2].flatMap((i) =>
-        items.filter(
-          (n) =>
-            n.lane === item.lane &&
-            n.tick === item.tick + i * item.duration &&
-            n.duration === item.duration &&
-            n.shape?.triplet,
-        ),
-      ),
-    ];
+  const tupletGroups = new Map<RhythmItem, number>();
+  for (const window of windows) {
+    const group = items.filter(
+      (item) =>
+        item.lane === window.lane &&
+        item.tick >= window.start &&
+        item.tick < window.end &&
+        item.shape?.triplet,
+    );
+    if (!group.length) continue;
     const complete =
-      item.tick % (item.duration * 3) === 0 && three.length === 3;
-    const group = complete ? three : [item];
-    group.forEach((n) => used.add(n));
+      window.end - window.start === window.step * 3 &&
+      group.length === 3 &&
+      group.every(
+        (item, index) =>
+          item.tick === window.start + index * window.step &&
+          item.duration === window.step,
+      );
+    group.forEach((item) => tupletGroups.set(item, tuplets.length));
     tuplets.push({ items: group, complete });
   }
   const beamGroups: RhythmItem[][] = [];
@@ -176,7 +224,6 @@ export function barRhythm(
   let current: RhythmItem[] = [];
   for (const item of items) {
     const previous = current.at(-1);
-    const span = item.shape?.triplet ? item.duration * 3 : unit;
     const connected =
       previous &&
       !item.rest &&
@@ -185,7 +232,9 @@ export function barRhythm(
       previous.lane === item.lane &&
       previous.tick + previous.duration === item.tick &&
       previous.shape?.triplet === item.shape.triplet &&
-      Math.floor(previous.tick / span) === Math.floor(item.tick / span);
+      (item.shape.triplet
+        ? tupletGroups.get(previous) === tupletGroups.get(item)
+        : Math.floor(previous.tick / unit) === Math.floor(item.tick / unit));
     if (!connected && current.length) {
       beamGroups.push(current);
       current = [];

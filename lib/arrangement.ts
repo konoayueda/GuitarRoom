@@ -254,8 +254,18 @@ export const GRID_OPTIONS = [
   { value: "9", label: "附点十六分" },
   { value: "24", label: "四分音符" },
 ];
-export const durationLabel = (ticks: number) =>
-  RHYTHMS.find((r) => r.ticks === ticks)?.label ?? ticks / 24 + " 拍";
+export function durationLabel(ticks: number) {
+  const rhythm = RHYTHMS.find((r) => r.ticks === ticks);
+  if (rhythm) return rhythm.label;
+  let numerator = ticks,
+    denominator = 24;
+  while (denominator) {
+    [numerator, denominator] = [denominator, numerator % denominator];
+  }
+  return ticks % 24 === 0
+    ? ticks / 24 + " 拍"
+    : ticks / numerator + "/" + 24 / numerator + " 拍";
+}
 export const rhythmSymbol = (ticks: number) =>
   RHYTHMS.find((r) => r.ticks === ticks)?.symbol ??
   Math.round((ticks / 24) * 100) / 100 + "拍";

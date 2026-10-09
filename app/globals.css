@@ -5470,6 +5470,14 @@ h1 {
   min-height: 28px;
   border-radius: 4px;
 }
+.gp-triplet-help {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .gp-shortcuts {
   display: flex;
   gap: 9px 20px;

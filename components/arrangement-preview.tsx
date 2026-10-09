@@ -19,7 +19,8 @@ import {
   type ArrangementBar,
 } from "@/lib/arrangement";
 import { tieRibbonPath } from "@/lib/tie-engraving";
-import { barRhythm } from "@/lib/notation";
+import { barRhythm, rhythmShape } from "@/lib/notation";
+import { scoreSpacing, type SpacingSpan } from "@/lib/score-spacing";
 import type { TickSpan } from "@/lib/score-editing";
 import RhythmNotation from "./rhythm-notation";
 import VocalNotation, { VOCAL_LANE_HEIGHT, vocalTieY } from "./vocal-notation";
@@ -29,6 +30,7 @@ import {
   lyricVocalNote,
 } from "@/lib/vocal-score";
 import ScoreChordDiagram from "./score-chord-diagram";
+import ScoreStaffStart, { SCORE_STAFF_START_WIDTH } from "./score-staff-start";
 import ScoreSymbolHelp from "./score-symbol-help";
 import ScoreLyrics, {
   scoreLyricsRowHeights,
@@ -44,7 +46,15 @@ export type ScoreSelection = {
   tick?: number;
   stringIndex?: number;
 };
+export type ScoreContextTarget =
+  | { kind: "guitar" | "chord"; selection: ScoreSelection }
+  | { kind: "vocal"; barId: string; tick: number }
+  | { kind: "lyrics"; barId: string; tick: number; verse: number }
+  | { kind: "bar" | "score"; barId: string };
+
 export type ScoreEditing = {
+  onContextMenu?: (target: ScoreContextTarget) => void;
+  onChordAdd?: (selection: ScoreSelection) => void;
   gridStep: number;
   selected: ScoreSelection;
   locked: boolean;
@@ -252,11 +262,15 @@ export default function ArrangementPreview({
       ) : (
         arrangement.sections.map((section, si) => {
           const minimumWidth = sectionWidths.get(section.id)!;
+          const usableWidth = Math.max(
+            0,
+            availableWidth - SCORE_STAFF_START_WIDTH,
+          );
           const columns = Math.max(
             1,
-            Math.min(4, Math.floor(availableWidth / minimumWidth)),
+            Math.min(4, Math.floor(usableWidth / minimumWidth)),
           );
-          const measureWidth = Math.max(minimumWidth, availableWidth / columns);
+          const measureWidth = Math.max(minimumWidth, usableWidth / columns);
           const layouts = section.bars.map((bar) =>
             layoutBar(bar, measureWidth, limit, arrangement, editing),
           );
@@ -306,15 +320,22 @@ export default function ArrangementPreview({
                   );
                   const lyricsHeight =
                     10 + rowHeights.reduce((sum, h) => sum + h, 0);
-                  const systemWidth = measureWidth * system.length;
+                  const measuresWidth = measureWidth * system.length;
+                  const systemWidth = SCORE_STAFF_START_WIDTH + measuresWidth;
                   const lyricBounds = system.map((bar, i) => {
                     const bounds = scoreLyricsHorizontalBounds(
                       { bar, ...systemLayouts[i], lineCount: lines },
                       !!editing,
                     );
                     return {
-                      left: i * measureWidth + bounds.left,
-                      right: i * measureWidth + bounds.right,
+                      left:
+                        SCORE_STAFF_START_WIDTH +
+                        i * measureWidth +
+                        bounds.left,
+                      right:
+                        SCORE_STAFF_START_WIDTH +
+                        i * measureWidth +
+                        bounds.right,
                     };
                   });
                   const leftPadding = Math.max(
@@ -337,14 +358,21 @@ export default function ArrangementPreview({
                         <div
                           className="tab-system-headings"
                           style={{
-                            width: systemWidth,
-                            marginLeft: leftPadding,
+                            width: measuresWidth,
+                            marginLeft: leftPadding + SCORE_STAFF_START_WIDTH,
                             gridTemplateColumns: `repeat(${system.length}, minmax(0, 1fr))`,
                           }}
                         >
                           {system.map((bar) => (
                             <header
                               key={bar.id}
+                              data-score-bar-header={bar.id}
+                              onContextMenu={() =>
+                                editing?.onContextMenu?.({
+                                  kind: "bar",
+                                  barId: bar.id,
+                                })
+                              }
                               className={
                                 editing?.selected.barId === bar.id
                                   ? "selected"
@@ -368,152 +396,347 @@ export default function ArrangementPreview({
                           role="group"
                           aria-label={`第 ${barNumbers.get(system[0].id)} 至 ${barNumbers.get(system.at(-1)!.id)} 小节连续谱行`}
                         >
-                          {system.map((bar, localIndex) => {
-                            const bi = firstIndex + localIndex;
-                            const barNumber = barNumbers.get(bar.id)!;
-                            const {
-                              total,
-                              points,
-                              width,
-                              step,
-                              x,
-                              rhythm,
-                              diagrams,
-                              tickAt,
-                            } = layouts[bi];
-                            const active = soundingBar === bar.id;
-                            let offset = 0;
-                            return (
-                              <g
-                                className={
-                                  "tab-preview-bar " +
-                                  (active ? "sounding " : "") +
-                                  (editing?.selected.barId === bar.id
-                                    ? "selected "
-                                    : "") +
-                                  (total !== limit ? "incomplete" : "")
-                                }
-                                key={bar.id}
-                                data-preview-bar={bar.id}
-                                transform={`translate(${localIndex * measureWidth} ${chordSpace})`}
-                                role="group"
-                                aria-label={`第 ${barNumber} 小节，${bar.events.map((e) => `${eventAttacks(e, arrangement.pattern).length ? (e.chord?.name ?? "单音") : "休止"}，${durationLabel(e.durationTicks)}`).join("；")}`}
-                              >
-                                <rect
-                                  className="tab-measure-focus"
-                                  x={localIndex === 0 ? 26 : 0}
-                                  y="34"
-                                  width={width - (localIndex === 0 ? 26 : 0)}
-                                  height={staffBottom + 32}
-                                />
-                                {total !== limit && (
-                                  <text
-                                    className="tab-incomplete-label"
-                                    x="30"
-                                    y="28"
-                                  >
-                                    {total < limit
-                                      ? `待补 ${(limit - total) / 24} 拍`
-                                      : `超出 ${(total - limit) / 24} 拍`}
-                                  </text>
-                                )}
-                                {total < limit && (
-                                  <rect
-                                    className="tab-unfilled"
-                                    x={x(total)}
-                                    y="40"
-                                    width={x(limit) - x(total)}
-                                    height={staffBottom - 32}
-                                  />
-                                )}
-                                {total > limit && (
-                                  <rect
-                                    className="tab-overflow"
-                                    x={x(limit)}
-                                    y="40"
-                                    width={x(total) - x(limit)}
-                                    height={staffBottom - 32}
-                                  />
-                                )}
-                                {active && (
-                                  <rect
-                                    className="tab-playhead"
-                                    x={x(position!.tickInBar)}
-                                    y="40"
-                                    width={3}
-                                    height={staffBottom - 32}
-                                  />
-                                )}
-                                {editing?.range &&
-                                  editing.range.start < barNumber * limit &&
-                                  editing.range.end >
-                                    (barNumber - 1) * limit && (
+                          <g
+                            onContextMenu={() =>
+                              editing?.onContextMenu?.({
+                                kind: "score",
+                                barId: system[0].id,
+                              })
+                            }
+                          >
+                            <ScoreStaffStart
+                              meter={arrangement.meter}
+                              vocalKey={arrangement.vocalKey}
+                              staffTop={chordSpace + 54}
+                              staffBottom={chordSpace + staffBottom}
+                              vocalTop={chordSpace + vocalTop}
+                              showVocal={showVocal}
+                              firstSystem={si === 0 && systemIndex === 0}
+                            />
+                          </g>
+                          <g
+                            transform={`translate(${SCORE_STAFF_START_WIDTH} 0)`}
+                          >
+                            {system.map((bar, localIndex) => {
+                              const bi = firstIndex + localIndex;
+                              const barNumber = barNumbers.get(bar.id)!;
+                              const {
+                                total,
+                                points,
+                                width,
+                                step,
+                                x,
+                                rhythm,
+                                diagrams,
+                                tickAt,
+                              } = layouts[bi];
+                              const active = soundingBar === bar.id;
+                              let offset = 0;
+                              return (
+                                <g
+                                  className={
+                                    "tab-preview-bar " +
+                                    (active ? "sounding " : "") +
+                                    (editing?.selected.barId === bar.id
+                                      ? "selected "
+                                      : "") +
+                                    (total !== limit ? "incomplete" : "")
+                                  }
+                                  key={bar.id}
+                                  data-preview-bar={bar.id}
+                                  transform={`translate(${localIndex * measureWidth} ${chordSpace})`}
+                                  role="group"
+                                  aria-label={`第 ${barNumber} 小节，${bar.events.map((e) => `${eventAttacks(e, arrangement.pattern).length ? (e.chord?.name ?? "单音") : "休止"}，${durationLabel(e.durationTicks)}`).join("；")}`}
+                                  onContextMenuCapture={(event) => {
+                                    if (
+                                      !editing?.onContextMenu ||
+                                      !(event.target instanceof Element)
+                                    )
+                                      return;
+                                    const target = event.target;
+                                    const matrix =
+                                      event.currentTarget.getScreenCTM();
+                                    if (!matrix) return;
+                                    const point = new DOMPoint(
+                                      event.clientX,
+                                      event.clientY,
+                                    ).matrixTransform(matrix.inverse());
+                                    const exact = target.closest(
+                                      "[data-note-cell], .tab-note",
+                                    );
+                                    const voice =
+                                      target.closest("[data-vocal-lane]");
+                                    const lyric = target.closest(
+                                      "textarea[data-lyric-cell], [data-lyric-drag], [data-lyric-text], [data-lyric-timeline]",
+                                    );
+                                    let tick = tickAt(point.x);
+                                    if (lyric || point.y >= lyricsTop) {
+                                      const key = (
+                                        lyric?.getAttribute(
+                                          "data-lyric-cell",
+                                        ) ??
+                                        lyric?.getAttribute("data-lyric-drag")
+                                      )?.split(":");
+                                      if (key) tick = Number(key.at(-2));
+                                      else if (
+                                        lyric?.hasAttribute("data-lyric-tick")
+                                      )
+                                        tick = Number(
+                                          lyric.getAttribute("data-lyric-tick"),
+                                        );
+                                      let verse =
+                                        Number(
+                                          lyric
+                                            ?.closest("[data-lyric-row]")
+                                            ?.getAttribute("data-lyric-row") ??
+                                            1,
+                                        ) - 1;
+                                      if (key) verse = Number(key.at(-1));
+                                      else if (!lyric) {
+                                        let y = lyricsTop + 10;
+                                        verse = rowHeights.findIndex(
+                                          (height) => (y += height) > point.y,
+                                        );
+                                        if (verse < 0) verse = lines - 1;
+                                      }
+                                      editing.onContextMenu({
+                                        kind: "lyrics",
+                                        barId: bar.id,
+                                        tick,
+                                        verse,
+                                      });
+                                    } else if (
+                                      voice ||
+                                      (showVocal && point.y >= vocalTop)
+                                    ) {
+                                      const note =
+                                        target.closest("[data-vocal-tick]");
+                                      if (note)
+                                        tick = Number(
+                                          note.getAttribute("data-vocal-tick"),
+                                        );
+                                      editing.onContextMenu({
+                                        kind: "vocal",
+                                        barId: bar.id,
+                                        tick,
+                                      });
+                                    } else {
+                                      const parts = exact
+                                        ?.getAttribute("data-note-cell")
+                                        ?.split(":");
+                                      const stringIndex = parts
+                                        ? Number(parts.at(-1))
+                                        : exact
+                                          ? 6 -
+                                            Number(
+                                              exact.getAttribute("data-string"),
+                                            )
+                                          : Math.max(
+                                              0,
+                                              Math.min(
+                                                5,
+                                                5 -
+                                                  Math.round(
+                                                    (point.y - 54) / rowGap,
+                                                  ),
+                                              ),
+                                            );
+                                      if (parts) tick = Number(parts.at(-2));
+                                      else if (exact)
+                                        tick = Number(
+                                          exact.getAttribute("data-tick"),
+                                        );
+                                      const chord = target.closest(
+                                        "[data-score-chord-event]",
+                                      );
+                                      let eventStart = 0;
+                                      const selectedEvent = bar.events.find(
+                                        (item) => {
+                                          const start = eventStart;
+                                          eventStart += item.durationTicks;
+                                          return chord
+                                            ? item.id ===
+                                                chord.getAttribute(
+                                                  "data-score-chord-event",
+                                                )
+                                            : tick >= start &&
+                                                tick < eventStart;
+                                        },
+                                      );
+                                      if (!selectedEvent) return;
+                                      const selection = {
+                                        barId: bar.id,
+                                        eventId: selectedEvent.id,
+                                      };
+                                      editing.onContextMenu(
+                                        point.y < 40 || chord
+                                          ? {
+                                              kind: "chord",
+                                              selection: chord
+                                                ? selection
+                                                : {
+                                                    ...selection,
+                                                    tick:
+                                                      tick -
+                                                      (eventStart -
+                                                        selectedEvent.durationTicks),
+                                                  },
+                                            }
+                                          : {
+                                              kind: "guitar",
+                                              selection: {
+                                                ...selection,
+                                                tick:
+                                                  tick -
+                                                  (eventStart -
+                                                    selectedEvent.durationTicks),
+                                                stringIndex,
+                                              },
+                                            },
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {editing && (
                                     <rect
-                                      className="gp-range-highlight"
-                                      data-selected-range="true"
-                                      x={x(
-                                        Math.max(
-                                          0,
-                                          editing.range.start -
-                                            (barNumber - 1) * limit,
-                                        ),
-                                      )}
+                                      className="score-context-hit"
+                                      x="0"
+                                      y={-chordSpace}
+                                      width={width}
+                                      height={
+                                        chordSpace + lyricsTop + lyricsHeight
+                                      }
+                                      fill="transparent"
+                                    />
+                                  )}
+                                  <rect
+                                    className="tab-measure-focus"
+                                    x={localIndex === 0 ? 26 : 0}
+                                    y="34"
+                                    width={width - (localIndex === 0 ? 26 : 0)}
+                                    height={staffBottom + 32}
+                                  />
+                                  {total !== limit && (
+                                    <text
+                                      className="tab-incomplete-label"
+                                      x="30"
+                                      y="28"
+                                    >
+                                      {total < limit
+                                        ? `待补 ${(limit - total) / 24} 拍`
+                                        : `超出 ${(total - limit) / 24} 拍`}
+                                    </text>
+                                  )}
+                                  {total < limit && (
+                                    <rect
+                                      className="tab-unfilled"
+                                      x={x(total)}
                                       y="40"
-                                      width={
-                                        x(
-                                          Math.min(
-                                            limit,
-                                            editing.range.end -
-                                              (barNumber - 1) * limit,
-                                          ),
-                                        ) -
-                                        x(
+                                      width={x(limit) - x(total)}
+                                      height={staffBottom - 32}
+                                    />
+                                  )}
+                                  {total > limit && (
+                                    <rect
+                                      className="tab-overflow"
+                                      x={x(limit)}
+                                      y="40"
+                                      width={x(total) - x(limit)}
+                                      height={staffBottom - 32}
+                                    />
+                                  )}
+                                  {active && (
+                                    <rect
+                                      className="tab-playhead"
+                                      x={x(position!.tickInBar)}
+                                      y="40"
+                                      width={3}
+                                      height={staffBottom - 32}
+                                    />
+                                  )}
+                                  {editing?.range &&
+                                    editing.range.start < barNumber * limit &&
+                                    editing.range.end >
+                                      (barNumber - 1) * limit && (
+                                      <rect
+                                        className="gp-range-highlight"
+                                        data-selected-range="true"
+                                        x={x(
                                           Math.max(
                                             0,
                                             editing.range.start -
                                               (barNumber - 1) * limit,
                                           ),
-                                        )
-                                      }
-                                      height={
-                                        staffBottom + rhythm.lanes * 44 - 20
-                                      }
+                                        )}
+                                        y="40"
+                                        width={
+                                          x(
+                                            Math.min(
+                                              limit,
+                                              editing.range.end -
+                                                (barNumber - 1) * limit,
+                                            ),
+                                          ) -
+                                          x(
+                                            Math.max(
+                                              0,
+                                              editing.range.start -
+                                                (barNumber - 1) * limit,
+                                            ),
+                                          )
+                                        }
+                                        height={
+                                          staffBottom + rhythm.lanes * 44 - 20
+                                        }
+                                      />
+                                    )}
+                                  {[0, 1, 2, 3, 4, 5].map((row) => (
+                                    <g key={row}>
+                                      {localIndex === 0 && (
+                                        <text
+                                          x="7"
+                                          y={58 + row * rowGap}
+                                          className="tab-string-label"
+                                          {...symbolHelp(
+                                            `第 ${row + 1} 弦`,
+                                            row === 0
+                                              ? "六线谱最上方是 1 弦，也就是最细的弦。"
+                                              : "从上往下数第 " +
+                                                  (row + 1) +
+                                                  " 条线；最下方是最粗的 6 弦。",
+                                            5,
+                                          )}
+                                        >
+                                          {row + 1}
+                                        </text>
+                                      )}
+                                      <line
+                                        x1={localIndex === 0 ? 26 : 0}
+                                        y1={54 + row * rowGap}
+                                        x2={width}
+                                        y2={54 + row * rowGap}
+                                        className="tab-string"
+                                      />
+                                    </g>
+                                  ))}
+                                  {localIndex === 0 && (
+                                    <line
+                                      x1="26"
+                                      y1="54"
+                                      x2="26"
+                                      y2={staffBottom}
+                                      className="tab-barline"
+                                      {...symbolHelp(
+                                        "小节线",
+                                        "分隔相邻小节；每小节的总时值由拍号决定。",
+                                        3,
+                                      )}
                                     />
                                   )}
-                                {[0, 1, 2, 3, 4, 5].map((row) => (
-                                  <g key={row}>
-                                    {localIndex === 0 && (
-                                      <text
-                                        x="7"
-                                        y={58 + row * rowGap}
-                                        className="tab-string-label"
-                                        {...symbolHelp(
-                                          `第 ${row + 1} 弦`,
-                                          row === 0
-                                            ? "六线谱最上方是 1 弦，也就是最细的弦。"
-                                            : "从上往下数第 " +
-                                                (row + 1) +
-                                                " 条线；最下方是最粗的 6 弦。",
-                                          5,
-                                        )}
-                                      >
-                                        {row + 1}
-                                      </text>
-                                    )}
-                                    <line
-                                      x1={localIndex === 0 ? 26 : 0}
-                                      y1={54 + row * rowGap}
-                                      x2={width}
-                                      y2={54 + row * rowGap}
-                                      className="tab-string"
-                                    />
-                                  </g>
-                                ))}
-                                {localIndex === 0 && (
                                   <line
-                                    x1="26"
+                                    x1={width}
                                     y1="54"
-                                    x2="26"
+                                    x2={width}
                                     y2={staffBottom}
                                     className="tab-barline"
                                     {...symbolHelp(
@@ -522,849 +745,878 @@ export default function ArrangementPreview({
                                       3,
                                     )}
                                   />
-                                )}
-                                <line
-                                  x1={width}
-                                  y1="54"
-                                  x2={width}
-                                  y2={staffBottom}
-                                  className="tab-barline"
-                                  {...symbolHelp(
-                                    "小节线",
-                                    "分隔相邻小节；每小节的总时值由拍号决定。",
-                                    3,
-                                  )}
-                                />
-                                <RhythmNotation
-                                  rhythm={rhythm}
-                                  x={(tick) => x(tick) + step / 2}
-                                  staffTop={54}
-                                  rowGap={rowGap}
-                                  staffStart={localIndex === 0 ? 26 : 0}
-                                  staffEnd={width}
-                                />
-                                {editing &&
-                                  points.slice(0, -1).map((tick) => (
-                                    <text
-                                      key={tick}
-                                      className="tab-beat"
-                                      {...symbolHelp(
-                                        "拍位",
-                                        beatLabel(tick, arrangement.meter) +
-                                          "。" +
-                                          (arrangement.meter === "6/8"
-                                            ? "八分音符计数 1–6，每三个组成一组。"
-                                            : "数字表示拍头，+ 表示半拍，· 表示更细的拍位。"),
-                                        5,
-                                      )}
-                                      textAnchor="middle"
-                                      x={x(tick) + step / 2}
-                                      y={vocalTop - 15}
-                                    >
-                                      {arrangement.meter === "6/8"
-                                        ? tick % 12 === 0
-                                          ? tick / 12 + 1
-                                          : "·"
-                                        : tick % 24 === 0
-                                          ? tick / 24 + 1
-                                          : tick % 12 === 0
-                                            ? "+"
-                                            : "·"}
-                                    </text>
-                                  ))}
-                                {bar.events.map((event) => {
-                                  const start = offset;
-                                  offset += event.durationTicks;
-                                  const eventWidth =
-                                    x(start + event.durationTicks) - x(start);
-                                  const current =
-                                    active &&
-                                    position?.event.event.id === event.id;
-                                  const notes = eventAttacks(
-                                    event,
-                                    arrangement.pattern,
-                                    capo,
-                                  );
-                                  const stroke =
-                                    event.stroke ??
-                                    (arrangement.pattern === "strum"
-                                      ? "down"
-                                      : "pluck");
-                                  const name =
-                                    event.chord?.name ??
-                                    (notes.length ? "单音" : "休止");
-                                  const selected =
-                                    editing?.selected.barId === bar.id &&
-                                    editing.selected.eventId === event.id;
-                                  return (
-                                    <g
-                                      key={event.id}
-                                      data-preview-event={event.id}
-                                      className={
-                                        "tab-event " +
-                                        (current ? "current " : "") +
-                                        (selected ? "selected" : "")
-                                      }
-                                      role={
-                                        editing
-                                          ? "group"
-                                          : onSelect
-                                            ? "button"
-                                            : undefined
-                                      }
-                                      tabIndex={onSelect ? 0 : undefined}
-                                      aria-label={
-                                        onSelect
-                                          ? `编辑第 ${barNumber} 小节的 ${name}`
-                                          : undefined
-                                      }
-                                      onClick={() => {
-                                        if (editing && !editing.locked)
-                                          editing.onSelect({
-                                            barId: bar.id,
-                                            eventId: event.id,
-                                          });
-                                        else onSelect?.(bar.id, event.id);
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (
-                                          onSelect &&
-                                          (e.key === "Enter" || e.key === " ")
-                                        ) {
-                                          e.preventDefault();
-                                          onSelect(bar.id, event.id);
+                                  <RhythmNotation
+                                    rhythm={rhythm}
+                                    x={(tick) => x(tick) + step / 2}
+                                    staffTop={54}
+                                    rowGap={rowGap}
+                                    staffStart={localIndex === 0 ? 26 : 0}
+                                    staffEnd={width}
+                                  />
+                                  {editing &&
+                                    points.slice(0, -1).map((tick) => (
+                                      <text
+                                        key={tick}
+                                        className="tab-beat"
+                                        {...symbolHelp(
+                                          "拍位",
+                                          beatLabel(tick, arrangement.meter) +
+                                            "。" +
+                                            (arrangement.meter === "6/8"
+                                              ? "八分音符计数 1–6，每三个组成一组。"
+                                              : "数字表示拍头，+ 表示半拍，· 表示更细的拍位。"),
+                                          5,
+                                        )}
+                                        textAnchor="middle"
+                                        x={x(tick) + step / 2}
+                                        y={vocalTop - 15}
+                                      >
+                                        {arrangement.meter === "6/8"
+                                          ? tick % 12 === 0
+                                            ? tick / 12 + 1
+                                            : "·"
+                                          : tick % 24 === 0
+                                            ? tick / 24 + 1
+                                            : tick % 12 === 0
+                                              ? "+"
+                                              : "·"}
+                                      </text>
+                                    ))}
+                                  {bar.events.map((event) => {
+                                    const start = offset;
+                                    offset += event.durationTicks;
+                                    const eventWidth =
+                                      x(start + event.durationTicks) - x(start);
+                                    const current =
+                                      active &&
+                                      position?.event.event.id === event.id;
+                                    const notes = eventAttacks(
+                                      event,
+                                      arrangement.pattern,
+                                      capo,
+                                    );
+                                    const stroke =
+                                      event.stroke ??
+                                      (arrangement.pattern === "strum"
+                                        ? "down"
+                                        : "pluck");
+                                    const name =
+                                      event.chord?.name ??
+                                      (notes.length ? "单音" : "休止");
+                                    const selected =
+                                      editing?.selected.barId === bar.id &&
+                                      editing.selected.eventId === event.id;
+                                    return (
+                                      <g
+                                        key={event.id}
+                                        data-preview-event={event.id}
+                                        className={
+                                          "tab-event " +
+                                          (current ? "current " : "") +
+                                          (selected ? "selected" : "")
                                         }
-                                      }}
-                                    >
-                                      <rect
-                                        className="tab-event-hit"
-                                        x={x(start)}
-                                        y="0"
-                                        width={eventWidth}
-                                        height="145"
-                                      />
-                                      {editing && (
-                                        <g
-                                          role="button"
-                                          tabIndex={editing.locked ? -1 : 0}
-                                          aria-disabled={editing.locked}
-                                          aria-label={`编辑第 ${barNumber} 小节的 ${name}`}
-                                          className="score-chord-target"
-                                          onKeyDown={(e) => {
-                                            if (
-                                              !editing.locked &&
-                                              (e.key === "Enter" ||
-                                                e.key === " ")
-                                            ) {
-                                              e.preventDefault();
-                                              editing.onSelect({
+                                        role={
+                                          editing
+                                            ? "group"
+                                            : onSelect
+                                              ? "button"
+                                              : undefined
+                                        }
+                                        tabIndex={onSelect ? 0 : undefined}
+                                        aria-label={
+                                          onSelect
+                                            ? `编辑第 ${barNumber} 小节的 ${name}`
+                                            : undefined
+                                        }
+                                        onClick={() => {
+                                          if (editing && !editing.locked)
+                                            editing.onSelect({
+                                              barId: bar.id,
+                                              eventId: event.id,
+                                            });
+                                          else onSelect?.(bar.id, event.id);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (
+                                            onSelect &&
+                                            (e.key === "Enter" || e.key === " ")
+                                          ) {
+                                            e.preventDefault();
+                                            onSelect(bar.id, event.id);
+                                          }
+                                        }}
+                                      >
+                                        <rect
+                                          className="tab-event-hit"
+                                          x={x(start)}
+                                          y="0"
+                                          width={eventWidth}
+                                          height="145"
+                                        />
+                                        {editing && (
+                                          <g
+                                            role="button"
+                                            tabIndex={editing.locked ? -1 : 0}
+                                            aria-disabled={editing.locked}
+                                            aria-label={
+                                              !event.chord && editing.onChordAdd
+                                                ? `添加第 ${barNumber} 小节和弦`
+                                                : `编辑第 ${barNumber} 小节的 ${name}`
+                                            }
+                                            className="score-chord-target"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (editing.locked) return;
+                                              const target = {
                                                 barId: bar.id,
                                                 eventId: event.id,
-                                              });
-                                            }
-                                          }}
-                                        >
-                                          <rect
-                                            x={x(start)}
-                                            y="0"
-                                            width={eventWidth}
-                                            height="40"
-                                            fill="transparent"
-                                          />
-                                        </g>
-                                      )}
-                                      {editing &&
-                                        !event.chord &&
-                                        eventWidth > 48 && (
-                                          <text
-                                            className="tab-add-chord"
-                                            x={x(start) + 4}
-                                            y="16"
-                                          >
-                                            和弦 +
-                                          </text>
-                                        )}
-                                      {(stroke === "down" || stroke === "up") &&
-                                        [
-                                          ...new Set(
-                                            notes.map((n) => n.offsetTick),
-                                          ),
-                                        ].map((tick) => {
-                                          const strings = notes
-                                            .filter(
-                                              (n) => n.offsetTick === tick,
-                                            )
-                                            .map((n) => n.stringIndex);
-                                          if (strings.length < 2) return null;
-                                          const low =
-                                              54 +
-                                              (5 - Math.min(...strings)) *
-                                                rowGap,
-                                            high =
-                                              54 +
-                                              (5 - Math.max(...strings)) *
-                                                rowGap;
-                                          const from =
-                                              stroke === "down" ? low : high,
-                                            to = stroke === "down" ? high : low,
-                                            px =
-                                              x(start + tick) + step / 2 - 17,
-                                            tail =
-                                              to - Math.sign(to - from) * 6;
-                                          return (
-                                            <path
-                                              key={tick}
-                                              className="tab-strum-arrow"
-                                              {...symbolHelp(
-                                                stroke === "down"
-                                                  ? "向下扫弦"
-                                                  : "向上扫弦",
-                                                (stroke === "down"
-                                                  ? "从较粗的弦向较细的弦扫奏（6 → 1）。"
-                                                  : "从较细的弦向较粗的弦扫奏（1 → 6）。") +
-                                                  "只扫箭头覆盖且谱面标出的弦。",
-                                                35,
-                                              )}
-                                              data-stroke={stroke}
-                                              d={
-                                                "M" +
-                                                px +
-                                                "," +
-                                                from +
-                                                "V" +
-                                                to +
-                                                "M" +
-                                                (px - 3) +
-                                                "," +
-                                                tail +
-                                                "L" +
-                                                px +
-                                                "," +
-                                                to +
-                                                "L" +
-                                                (px + 3) +
-                                                "," +
-                                                tail
+                                              };
+                                              if (
+                                                !event.chord &&
+                                                editing.onChordAdd
+                                              )
+                                                editing.onChordAdd(target);
+                                              else editing.onSelect(target);
+                                            }}
+                                            onKeyDown={(e) => {
+                                              if (
+                                                !editing.locked &&
+                                                (e.key === "Enter" ||
+                                                  e.key === " ")
+                                              ) {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                const target = {
+                                                  barId: bar.id,
+                                                  eventId: event.id,
+                                                };
+                                                if (
+                                                  !event.chord &&
+                                                  editing.onChordAdd
+                                                )
+                                                  editing.onChordAdd(target);
+                                                else editing.onSelect(target);
                                               }
-                                            ></path>
-                                          );
-                                        })}
-                                      {notes.map((note, ni) => (
-                                        <g
-                                          key={ni}
-                                          className="tab-note"
-                                          data-string={6 - note.stringIndex}
-                                          data-fret={note.fret}
-                                          data-marker={note.marker}
-                                          data-tick={start + note.offsetTick}
-                                          data-note-duration={
-                                            note.durationTicks
-                                          }
-                                        >
-                                          <rect
-                                            {...noteHelp(
-                                              note,
-                                              event.chord?.name,
-                                            )}
-                                            x={
-                                              x(start + note.offsetTick) +
-                                              step / 2 -
-                                              10
-                                            }
-                                            y={
-                                              54 +
-                                              (5 - note.stringIndex) * rowGap -
-                                              9
-                                            }
-                                            width="20"
-                                            height="17"
-                                            rx="2"
-                                          />
-                                          <text
-                                            x={
-                                              x(start + note.offsetTick) +
-                                              step / 2
-                                            }
-                                            y={
-                                              54 +
-                                              (5 - note.stringIndex) * rowGap +
-                                              5
-                                            }
-                                            textAnchor="middle"
+                                            }}
                                           >
-                                            {note.marker === "cross"
-                                              ? "×"
-                                              : note.fret}
-                                          </text>
-                                          {note.tieToNext &&
-                                            !(
-                                              outgoing.get(
-                                                event.id +
-                                                  ":" +
-                                                  note.offsetTick +
-                                                  ":" +
-                                                  note.stringIndex,
-                                              ) !== bar.id &&
-                                              systemIds.has(
+                                            <rect
+                                              x={x(start)}
+                                              y="0"
+                                              width={eventWidth}
+                                              height="40"
+                                              fill="transparent"
+                                            />
+                                          </g>
+                                        )}
+                                        {editing &&
+                                          !event.chord &&
+                                          eventWidth > 48 && (
+                                            <text
+                                              className="tab-add-chord"
+                                              pointerEvents="none"
+                                              x={x(start) + 4}
+                                              y="16"
+                                            >
+                                              和弦 +
+                                            </text>
+                                          )}
+                                        {(stroke === "down" ||
+                                          stroke === "up") &&
+                                          [
+                                            ...new Set(
+                                              notes.map((n) => n.offsetTick),
+                                            ),
+                                          ].map((tick) => {
+                                            const strings = notes
+                                              .filter(
+                                                (n) => n.offsetTick === tick,
+                                              )
+                                              .map((n) => n.stringIndex);
+                                            if (strings.length < 2) return null;
+                                            const low =
+                                                54 +
+                                                (5 - Math.min(...strings)) *
+                                                  rowGap,
+                                              high =
+                                                54 +
+                                                (5 - Math.max(...strings)) *
+                                                  rowGap;
+                                            const from =
+                                                stroke === "down" ? low : high,
+                                              to =
+                                                stroke === "down" ? high : low,
+                                              px =
+                                                x(start + tick) + step / 2 - 17,
+                                              tail =
+                                                to - Math.sign(to - from) * 6;
+                                            return (
+                                              <path
+                                                key={tick}
+                                                className="tab-strum-arrow"
+                                                {...symbolHelp(
+                                                  stroke === "down"
+                                                    ? "向下扫弦"
+                                                    : "向上扫弦",
+                                                  (stroke === "down"
+                                                    ? "从较粗的弦向较细的弦扫奏（6 → 1）。"
+                                                    : "从较细的弦向较粗的弦扫奏（1 → 6）。") +
+                                                    "只扫箭头覆盖且谱面标出的弦。",
+                                                  35,
+                                                )}
+                                                data-stroke={stroke}
+                                                d={
+                                                  "M" +
+                                                  px +
+                                                  "," +
+                                                  from +
+                                                  "V" +
+                                                  to +
+                                                  "M" +
+                                                  (px - 3) +
+                                                  "," +
+                                                  tail +
+                                                  "L" +
+                                                  px +
+                                                  "," +
+                                                  to +
+                                                  "L" +
+                                                  (px + 3) +
+                                                  "," +
+                                                  tail
+                                                }
+                                              ></path>
+                                            );
+                                          })}
+                                        {notes.map((note, ni) => (
+                                          <g
+                                            key={ni}
+                                            className="tab-note"
+                                            data-string={6 - note.stringIndex}
+                                            data-fret={note.fret}
+                                            data-marker={note.marker}
+                                            data-tick={start + note.offsetTick}
+                                            data-note-duration={
+                                              note.durationTicks
+                                            }
+                                          >
+                                            <rect
+                                              {...noteHelp(
+                                                note,
+                                                event.chord?.name,
+                                              )}
+                                              x={
+                                                x(start + note.offsetTick) +
+                                                step / 2 -
+                                                10
+                                              }
+                                              y={
+                                                54 +
+                                                (5 - note.stringIndex) *
+                                                  rowGap -
+                                                9
+                                              }
+                                              width="20"
+                                              height="17"
+                                              rx="2"
+                                            />
+                                            <text
+                                              x={
+                                                x(start + note.offsetTick) +
+                                                step / 2
+                                              }
+                                              y={
+                                                54 +
+                                                (5 - note.stringIndex) *
+                                                  rowGap +
+                                                5
+                                              }
+                                              textAnchor="middle"
+                                            >
+                                              {note.marker === "cross"
+                                                ? "×"
+                                                : note.fret}
+                                            </text>
+                                            {note.tieToNext &&
+                                              !(
                                                 outgoing.get(
                                                   event.id +
                                                     ":" +
                                                     note.offsetTick +
                                                     ":" +
                                                     note.stringIndex,
-                                                ) ?? "",
-                                              )
-                                            ) && (
-                                              <TabTie
-                                                from={
-                                                  x(start + note.offsetTick) +
-                                                  step / 2 +
-                                                  3
-                                                }
-                                                to={Math.min(
-                                                  width - 8,
-                                                  x(
-                                                    start +
-                                                      note.offsetTick +
-                                                      note.durationTicks,
-                                                  ) +
-                                                    step / 2 -
-                                                    3,
-                                                )}
-                                                y={
-                                                  54 +
-                                                  (5 - note.stringIndex) *
-                                                    rowGap
-                                                }
-                                                direction={
+                                                ) !== bar.id &&
+                                                systemIds.has(
                                                   outgoing.get(
                                                     event.id +
                                                       ":" +
                                                       note.offsetTick +
                                                       ":" +
                                                       note.stringIndex,
-                                                  ) === bar.id
-                                                    ? "internal"
-                                                    : "outgoing"
-                                                }
-                                                maxRise={rowGap - 13}
-                                              />
-                                            )}
-                                          {incoming.has(
-                                            event.id +
-                                              ":" +
-                                              note.offsetTick +
-                                              ":" +
-                                              note.stringIndex,
-                                          ) &&
-                                            incoming.get(
+                                                  ) ?? "",
+                                                )
+                                              ) && (
+                                                <TabTie
+                                                  from={
+                                                    x(start + note.offsetTick) +
+                                                    step / 2 +
+                                                    3
+                                                  }
+                                                  to={Math.min(
+                                                    width - 8,
+                                                    x(
+                                                      start +
+                                                        note.offsetTick +
+                                                        note.durationTicks,
+                                                    ) +
+                                                      step / 2 -
+                                                      3,
+                                                  )}
+                                                  y={
+                                                    54 +
+                                                    (5 - note.stringIndex) *
+                                                      rowGap
+                                                  }
+                                                  direction={
+                                                    outgoing.get(
+                                                      event.id +
+                                                        ":" +
+                                                        note.offsetTick +
+                                                        ":" +
+                                                        note.stringIndex,
+                                                    ) === bar.id
+                                                      ? "internal"
+                                                      : "outgoing"
+                                                  }
+                                                  maxRise={rowGap - 13}
+                                                />
+                                              )}
+                                            {incoming.has(
                                               event.id +
                                                 ":" +
                                                 note.offsetTick +
                                                 ":" +
                                                 note.stringIndex,
-                                            ) !== bar.id &&
-                                            !systemIds.has(
+                                            ) &&
                                               incoming.get(
                                                 event.id +
                                                   ":" +
                                                   note.offsetTick +
                                                   ":" +
                                                   note.stringIndex,
-                                              ) ?? "",
-                                            ) && (
-                                              <TabTie
-                                                from={26}
-                                                to={
-                                                  x(start + note.offsetTick) +
-                                                  step / 2 -
-                                                  3
-                                                }
-                                                y={
-                                                  54 +
-                                                  (5 - note.stringIndex) *
-                                                    rowGap
-                                                }
-                                                direction="incoming"
-                                                maxRise={rowGap - 13}
-                                              />
-                                            )}
-                                        </g>
-                                      ))}
-                                      {editing &&
-                                        points
-                                          .filter(
-                                            (t) =>
-                                              t >= start &&
-                                              t < start + event.durationTicks,
-                                          )
-                                          .map((t) => t - start)
-                                          .map((tick) =>
-                                            [5, 4, 3, 2, 1, 0].map(
-                                              (stringIndex) => {
-                                                const note = notes.find(
-                                                  (n) =>
-                                                    n.offsetTick === tick &&
-                                                    n.stringIndex ===
-                                                      stringIndex,
-                                                );
-                                                const picked =
-                                                  selected &&
-                                                  editing.selected.tick ===
-                                                    tick &&
-                                                  editing.selected
-                                                    .stringIndex ===
-                                                    stringIndex;
-                                                const selection = {
-                                                  barId: bar.id,
-                                                  eventId: event.id,
-                                                  tick,
-                                                  stringIndex,
-                                                };
-                                                return (
-                                                  <g
-                                                    key={
-                                                      tick + ":" + stringIndex
-                                                    }
-                                                    role="button"
-                                                    tabIndex={
-                                                      editing.locked
-                                                        ? -1
-                                                        : picked ||
-                                                            (editing.selected
-                                                              .tick ===
-                                                              undefined &&
-                                                              start === 0 &&
-                                                              tick === 0 &&
-                                                              stringIndex === 5)
-                                                          ? 0
-                                                          : -1
-                                                    }
-                                                    data-symbol-focus-only="true"
-                                                    {...(note
-                                                      ? noteHelp(
-                                                          note,
-                                                          event.chord?.name,
+                                              ) !== bar.id &&
+                                              !systemIds.has(
+                                                incoming.get(
+                                                  event.id +
+                                                    ":" +
+                                                    note.offsetTick +
+                                                    ":" +
+                                                    note.stringIndex,
+                                                ) ?? "",
+                                              ) && (
+                                                <TabTie
+                                                  from={26}
+                                                  to={
+                                                    x(start + note.offsetTick) +
+                                                    step / 2 -
+                                                    3
+                                                  }
+                                                  y={
+                                                    54 +
+                                                    (5 - note.stringIndex) *
+                                                      rowGap
+                                                  }
+                                                  direction="incoming"
+                                                  maxRise={rowGap - 13}
+                                                />
+                                              )}
+                                          </g>
+                                        ))}
+                                        {editing &&
+                                          points
+                                            .filter(
+                                              (t) =>
+                                                t >= start &&
+                                                t < start + event.durationTicks,
+                                            )
+                                            .map((t) => t - start)
+                                            .map((tick) =>
+                                              [5, 4, 3, 2, 1, 0].map(
+                                                (stringIndex) => {
+                                                  const note = notes.find(
+                                                    (n) =>
+                                                      n.offsetTick === tick &&
+                                                      n.stringIndex ===
+                                                        stringIndex,
+                                                  );
+                                                  const picked =
+                                                    selected &&
+                                                    editing.selected.tick ===
+                                                      tick &&
+                                                    editing.selected
+                                                      .stringIndex ===
+                                                      stringIndex;
+                                                  const selection = {
+                                                    barId: bar.id,
+                                                    eventId: event.id,
+                                                    tick,
+                                                    stringIndex,
+                                                  };
+                                                  return (
+                                                    <g
+                                                      key={
+                                                        tick + ":" + stringIndex
+                                                      }
+                                                      role="button"
+                                                      tabIndex={
+                                                        editing.locked
+                                                          ? -1
+                                                          : picked ||
+                                                              (editing.selected
+                                                                .tick ===
+                                                                undefined &&
+                                                                start === 0 &&
+                                                                tick === 0 &&
+                                                                stringIndex ===
+                                                                  5)
+                                                            ? 0
+                                                            : -1
+                                                      }
+                                                      data-symbol-focus-only="true"
+                                                      {...(note
+                                                        ? noteHelp(
+                                                            note,
+                                                            event.chord?.name,
+                                                          )
+                                                        : {})}
+                                                      data-note-cell={
+                                                        bar.id +
+                                                        ":" +
+                                                        (start + tick) +
+                                                        ":" +
+                                                        stringIndex
+                                                      }
+                                                      aria-label={`第 ${barNumber} 小节 ${beatLabel(start + tick, arrangement.meter)} ${6 - stringIndex} 弦${note ? ` ${note.fret} 品` : " 空位"}`}
+                                                      aria-disabled={
+                                                        editing.locked
+                                                      }
+                                                      className={
+                                                        "score-note-cell " +
+                                                        (picked ? "picked" : "")
+                                                      }
+                                                      onFocus={() => {
+                                                        if (
+                                                          !editing.locked &&
+                                                          !picked
                                                         )
-                                                      : {})}
-                                                    data-note-cell={
-                                                      bar.id +
-                                                      ":" +
-                                                      (start + tick) +
-                                                      ":" +
-                                                      stringIndex
-                                                    }
-                                                    aria-label={`第 ${barNumber} 小节 ${beatLabel(start + tick, arrangement.meter)} ${6 - stringIndex} 弦${note ? ` ${note.fret} 品` : " 空位"}`}
-                                                    aria-disabled={
-                                                      editing.locked
-                                                    }
-                                                    className={
-                                                      "score-note-cell " +
-                                                      (picked ? "picked" : "")
-                                                    }
-                                                    onFocus={() => {
-                                                      if (
-                                                        !editing.locked &&
-                                                        !picked
-                                                      )
-                                                        editing.onSelect(
+                                                          editing.onSelect(
+                                                            selection,
+                                                          );
+                                                      }}
+                                                      onPointerDown={(e) =>
+                                                        e.preventDefault()
+                                                      }
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (!editing.locked) {
+                                                          const target =
+                                                            e.currentTarget;
+                                                          editing.onSelect(
+                                                            selection,
+                                                            e.shiftKey,
+                                                          );
+                                                          requestAnimationFrame(
+                                                            () =>
+                                                              target.focus({
+                                                                preventScroll: true,
+                                                              }),
+                                                          );
+                                                        }
+                                                      }}
+                                                      onKeyDown={(e) => {
+                                                        e.stopPropagation();
+                                                        editing.onKey(
+                                                          e,
                                                           selection,
                                                         );
-                                                    }}
-                                                    onPointerDown={(e) =>
-                                                      e.preventDefault()
-                                                    }
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      if (!editing.locked) {
-                                                        const target =
-                                                          e.currentTarget;
-                                                        editing.onSelect(
-                                                          selection,
-                                                          e.shiftKey,
-                                                        );
-                                                        requestAnimationFrame(
-                                                          () =>
-                                                            target.focus({
-                                                              preventScroll: true,
-                                                            }),
-                                                        );
-                                                      }
-                                                    }}
-                                                    onKeyDown={(e) => {
-                                                      e.stopPropagation();
-                                                      editing.onKey(
-                                                        e,
-                                                        selection,
-                                                      );
-                                                    }}
-                                                  >
-                                                    <rect
-                                                      className="score-cell-hit"
-                                                      x={x(start + tick)}
-                                                      y={
-                                                        54 +
-                                                        (5 - stringIndex) *
-                                                          rowGap -
-                                                        rowGap / 2
-                                                      }
-                                                      width={step}
-                                                      height={rowGap}
-                                                    />
-                                                    <rect
-                                                      x={
-                                                        x(start + tick) +
-                                                        step / 2 -
-                                                        12
-                                                      }
-                                                      y={
-                                                        54 +
-                                                        (5 - stringIndex) *
-                                                          rowGap -
-                                                        rowGap / 2
-                                                      }
-                                                      width="24"
-                                                      height={rowGap}
-                                                      rx="3"
-                                                    />
-                                                    {picked && !note && (
-                                                      <text
+                                                      }}
+                                                    >
+                                                      <rect
+                                                        className="score-cell-hit"
+                                                        x={x(start + tick)}
+                                                        y={
+                                                          54 +
+                                                          (5 - stringIndex) *
+                                                            rowGap -
+                                                          rowGap / 2
+                                                        }
+                                                        width={step}
+                                                        height={rowGap}
+                                                      />
+                                                      <rect
                                                         x={
                                                           x(start + tick) +
-                                                          step / 2
+                                                          step / 2 -
+                                                          12
                                                         }
                                                         y={
-                                                          59 +
+                                                          54 +
                                                           (5 - stringIndex) *
-                                                            rowGap
+                                                            rowGap -
+                                                          rowGap / 2
                                                         }
-                                                        textAnchor="middle"
-                                                      >
-                                                        +
-                                                      </text>
-                                                    )}
-                                                  </g>
-                                                );
-                                              },
-                                            ),
-                                          )}
-                                    </g>
-                                  );
-                                })}
-                                {diagrams.map((diagram) => (
-                                  <g
-                                    key={diagram.eventId}
-                                    className="score-diagram-target"
-                                    {...symbolHelp(
-                                      "和弦指型 · " + diagram.chord.name,
-                                      "竖线从左到右是 6 弦到 1 弦，横格是品位。黑点表示按弦，空心圈表示空弦，图上的 × 表示不弹。" +
-                                        (editing ? "点击可编辑当前和弦。" : ""),
-                                      5,
-                                    )}
-                                    role={editing ? "button" : undefined}
-                                    tabIndex={
-                                      editing && !editing.locked ? 0 : undefined
-                                    }
-                                    aria-label={
-                                      (editing ? "编辑和弦 " : "和弦 ") +
-                                      diagram.chord.name
-                                    }
-                                    aria-disabled={editing?.locked}
-                                    onClick={() => {
-                                      if (editing && !editing.locked)
-                                        editing.onSelect({
-                                          barId: bar.id,
-                                          eventId: diagram.eventId,
-                                        });
-                                      else onSelect?.(bar.id, diagram.eventId);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (
-                                        editing &&
-                                        !editing.locked &&
-                                        (e.key === "Enter" || e.key === " ")
-                                      ) {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        editing.onSelect({
-                                          barId: bar.id,
-                                          eventId: diagram.eventId,
-                                        });
+                                                        width="24"
+                                                        height={rowGap}
+                                                        rx="3"
+                                                      />
+                                                      {picked && !note && (
+                                                        <text
+                                                          x={
+                                                            x(start + tick) +
+                                                            step / 2
+                                                          }
+                                                          y={
+                                                            59 +
+                                                            (5 - stringIndex) *
+                                                              rowGap
+                                                          }
+                                                          textAnchor="middle"
+                                                        >
+                                                          +
+                                                        </text>
+                                                      )}
+                                                    </g>
+                                                  );
+                                                },
+                                              ),
+                                            )}
+                                      </g>
+                                    );
+                                  })}
+                                  {diagrams.map((diagram) => (
+                                    <g
+                                      key={diagram.eventId}
+                                      className="score-diagram-target"
+                                      data-score-chord-event={diagram.eventId}
+                                      {...symbolHelp(
+                                        "和弦指型 · " + diagram.chord.name,
+                                        "竖线从左到右是 6 弦到 1 弦，横格是品位。黑点表示按弦，空心圈表示空弦，图上的 × 表示不弹。" +
+                                          (editing
+                                            ? "点击可编辑当前和弦。"
+                                            : ""),
+                                        5,
+                                      )}
+                                      role={editing ? "button" : undefined}
+                                      tabIndex={
+                                        editing && !editing.locked
+                                          ? 0
+                                          : undefined
                                       }
-                                    }}
-                                  >
-                                    <rect
-                                      className="score-diagram-hit"
-                                      x={diagram.left}
-                                      y={-chordSpace + diagram.row * 104 + 6}
-                                      width="84"
-                                      height="96"
-                                      fill="transparent"
+                                      aria-label={
+                                        (editing ? "编辑和弦 " : "和弦 ") +
+                                        diagram.chord.name
+                                      }
+                                      aria-disabled={editing?.locked}
+                                      onClick={() => {
+                                        if (editing && !editing.locked)
+                                          editing.onSelect({
+                                            barId: bar.id,
+                                            eventId: diagram.eventId,
+                                          });
+                                        else
+                                          onSelect?.(bar.id, diagram.eventId);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (
+                                          editing &&
+                                          !editing.locked &&
+                                          (e.key === "Enter" || e.key === " ")
+                                        ) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          editing.onSelect({
+                                            barId: bar.id,
+                                            eventId: diagram.eventId,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <rect
+                                        className="score-diagram-hit"
+                                        x={diagram.left}
+                                        y={-chordSpace + diagram.row * 104 + 6}
+                                        width="84"
+                                        height="96"
+                                        fill="transparent"
+                                      />
+                                      <ScoreChordDiagram
+                                        chord={diagram.chord}
+                                        x={diagram.left}
+                                        y={-chordSpace + diagram.row * 104 + 6}
+                                      />
+                                    </g>
+                                  ))}
+                                  {showVocal && (
+                                    <VocalNotation
+                                      bar={bar}
+                                      barNumber={barNumber}
+                                      meter={arrangement.meter}
+                                      points={points}
+                                      x={x}
+                                      step={step}
+                                      width={width}
+                                      top={vocalTop}
+                                      showLabel={localIndex === 0}
+                                      positionTick={
+                                        active ? position?.tickInBar : undefined
+                                      }
+                                      editing={
+                                        editing
+                                          ? {
+                                              locked: editing.locked,
+                                              active: editing.vocalActive,
+                                              selected: editing.vocalSelected,
+                                              tickAt,
+                                              gridStep: 1,
+                                              onSelect: editing.onVocalSelect,
+                                              onKey: editing.onVocalKey,
+                                            }
+                                          : undefined
+                                      }
                                     />
-                                    <ScoreChordDiagram
-                                      chord={diagram.chord}
-                                      x={diagram.left}
-                                      y={-chordSpace + diagram.row * 104 + 6}
-                                    />
-                                  </g>
-                                ))}
-                                {showVocal && (
-                                  <VocalNotation
+                                  )}
+                                  <ScoreLyrics
                                     bar={bar}
                                     barNumber={barNumber}
-                                    meter={arrangement.meter}
                                     points={points}
                                     x={x}
                                     step={step}
                                     width={width}
-                                    top={vocalTop}
-                                    showLabel={localIndex === 0}
-                                    positionTick={
-                                      active ? position?.tickInBar : undefined
-                                    }
+                                    top={lyricsTop}
+                                    rowHeights={rowHeights}
+                                    lineCount={lines}
+                                    extensions={lyricExtensions.get(bar.id)}
+                                    barStartTick={(barNumber - 1) * limit}
+                                    tickAt={tickAt}
+                                    snapStep={1}
+                                    absoluteTickAt={(clientX) => {
+                                      const svg =
+                                        root.current?.querySelector<SVGGElement>(
+                                          '[data-preview-bar="' +
+                                            CSS.escape(bar.id) +
+                                            '"]',
+                                        )?.ownerSVGElement;
+                                      const matrix = svg?.getScreenCTM();
+                                      if (!matrix)
+                                        return (barNumber - 1) * limit;
+                                      const point = new DOMPoint(
+                                        clientX,
+                                        0,
+                                      ).matrixTransform(matrix.inverse());
+                                      const scoreX =
+                                        point.x - SCORE_STAFF_START_WIDTH;
+                                      const index = Math.max(
+                                        0,
+                                        Math.min(
+                                          system.length - 1,
+                                          Math.floor(scoreX / measureWidth),
+                                        ),
+                                      );
+                                      return (
+                                        (barNumbers.get(system[index].id)! -
+                                          1) *
+                                          limit +
+                                        systemLayouts[index].tickAt(
+                                          scoreX - index * measureWidth,
+                                        )
+                                      );
+                                    }}
+                                    meter={arrangement.meter}
                                     editing={
                                       editing
                                         ? {
                                             locked: editing.locked,
-                                            active: editing.vocalActive,
-                                            selected: editing.vocalSelected,
-                                            tickAt,
-                                            gridStep: 1,
-                                            onSelect: editing.onVocalSelect,
-                                            onKey: editing.onVocalKey,
+                                            active: editing.lyricActive,
+                                            mode: editing.lyricMode,
+                                            onLayout: editing.onLyricLayout,
+                                            onChange: editing.onLyricChange,
+                                            onBegin: editing.onLyricBegin,
+                                            selected: editing.lyricSelected,
+                                            onSelect: editing.onLyricSelect,
+                                            onMove: editing.onLyricMove,
                                           }
                                         : undefined
                                     }
                                   />
-                                )}
-                                <ScoreLyrics
-                                  bar={bar}
-                                  barNumber={barNumber}
-                                  points={points}
-                                  x={x}
-                                  step={step}
-                                  width={width}
-                                  top={lyricsTop}
-                                  rowHeights={rowHeights}
-                                  lineCount={lines}
-                                  extensions={lyricExtensions.get(bar.id)}
-                                  barStartTick={(barNumber - 1) * limit}
-                                  tickAt={tickAt}
-                                  snapStep={1}
-                                  absoluteTickAt={(clientX) => {
-                                    const svg =
-                                      root.current?.querySelector<SVGGElement>(
-                                        '[data-preview-bar="' +
-                                          CSS.escape(bar.id) +
-                                          '"]',
-                                      )?.ownerSVGElement;
-                                    const matrix = svg?.getScreenCTM();
-                                    if (!matrix) return (barNumber - 1) * limit;
-                                    const point = new DOMPoint(
-                                      clientX,
-                                      0,
-                                    ).matrixTransform(matrix.inverse());
-                                    const index = Math.max(
-                                      0,
-                                      Math.min(
-                                        system.length - 1,
-                                        Math.floor(point.x / measureWidth),
-                                      ),
+                                </g>
+                              );
+                            })}
+                            {showVocal &&
+                              vocals
+                                .filter(
+                                  (note) =>
+                                    note.tieToNext && systemIds.has(note.barId),
+                                )
+                                .map((note) => {
+                                  const target = vocals.find(
+                                    (n) =>
+                                      n.startTick ===
+                                        note.startTick + note.durationTicks &&
+                                      n.degree === note.degree &&
+                                      n.octave === note.octave &&
+                                      (n.accidental ?? 0) ===
+                                        (note.accidental ?? 0),
+                                  );
+                                  if (!target || target.barId === note.barId)
+                                    return null;
+                                  const sourceIndex = system.findIndex(
+                                      (b) => b.id === note.barId,
+                                    ),
+                                    targetIndex = system.findIndex(
+                                      (b) => b.id === target.barId,
                                     );
-                                    return (
-                                      (barNumbers.get(system[index].id)! - 1) *
-                                        limit +
-                                      systemLayouts[index].tickAt(
-                                        point.x - index * measureWidth,
-                                      )
-                                    );
-                                  }}
-                                  meter={arrangement.meter}
-                                  editing={
-                                    editing
-                                      ? {
-                                          locked: editing.locked,
-                                          active: editing.lyricActive,
-                                          mode: editing.lyricMode,
-                                          onLayout: editing.onLyricLayout,
-                                          onChange: editing.onLyricChange,
-                                          onBegin: editing.onLyricBegin,
-                                          selected: editing.lyricSelected,
-                                          onSelect: editing.onLyricSelect,
-                                          onMove: editing.onLyricMove,
-                                        }
-                                      : undefined
-                                  }
-                                />
-                              </g>
-                            );
-                          })}
-                          {showVocal &&
-                            vocals
+                                  const from =
+                                    sourceIndex * measureWidth +
+                                    systemLayouts[sourceIndex].x(note.tick) +
+                                    systemLayouts[sourceIndex].step / 2 +
+                                    3;
+                                  const to =
+                                    targetIndex >= 0
+                                      ? targetIndex * measureWidth +
+                                        systemLayouts[targetIndex].x(
+                                          target.tick,
+                                        ) +
+                                        systemLayouts[targetIndex].step / 2 -
+                                        3
+                                      : measuresWidth - 4;
+                                  const y =
+                                    chordSpace + vocalTop + vocalTieY(note);
+                                  return (
+                                    <path
+                                      key={note.id}
+                                      className="vocal-tie engraved-tie"
+                                      data-vocal-tie={
+                                        targetIndex >= 0
+                                          ? "cross-bar"
+                                          : "outgoing"
+                                      }
+                                      {...symbolHelp(
+                                        "唱音延音",
+                                        "同音延续，只唱一次；跨小节时持续到续音结束。",
+                                        50,
+                                      )}
+                                      d={tieRibbonPath(
+                                        from,
+                                        to,
+                                        y,
+                                        10,
+                                        targetIndex >= 0 ? "full" : "outgoing",
+                                      )}
+                                      fill="#171715"
+                                      stroke="none"
+                                    />
+                                  );
+                                })}
+                            {showVocal &&
+                              vocals
+                                .filter((note) => systemIds.has(note.barId))
+                                .map((note) => {
+                                  const source = vocals.find(
+                                    (n) =>
+                                      n.tieToNext &&
+                                      n.startTick + n.durationTicks ===
+                                        note.startTick &&
+                                      n.degree === note.degree &&
+                                      n.octave === note.octave &&
+                                      (n.accidental ?? 0) ===
+                                        (note.accidental ?? 0),
+                                  );
+                                  if (!source || systemIds.has(source.barId))
+                                    return null;
+                                  const index = system.findIndex(
+                                      (b) => b.id === note.barId,
+                                    ),
+                                    from = index * measureWidth + 26,
+                                    to =
+                                      index * measureWidth +
+                                      systemLayouts[index].x(note.tick) +
+                                      systemLayouts[index].step / 2 -
+                                      3,
+                                    y = chordSpace + vocalTop + vocalTieY(note);
+                                  return (
+                                    <path
+                                      key={"incoming:" + note.id}
+                                      className="vocal-tie engraved-tie"
+                                      data-vocal-tie="incoming"
+                                      {...symbolHelp(
+                                        "唱音延音",
+                                        "上一谱行同音在此继续保持。",
+                                        50,
+                                      )}
+                                      d={tieRibbonPath(
+                                        from,
+                                        to,
+                                        y,
+                                        10,
+                                        "incoming",
+                                      )}
+                                      fill="#171715"
+                                      stroke="none"
+                                    />
+                                  );
+                                })}
+                            {written
                               .filter(
                                 (note) =>
                                   note.tieToNext && systemIds.has(note.barId),
                               )
                               .map((note) => {
-                                const target = vocals.find(
-                                  (n) =>
-                                    n.startTick ===
-                                      note.startTick + note.durationTicks &&
-                                    n.degree === note.degree &&
-                                    n.octave === note.octave &&
-                                    (n.accidental ?? 0) ===
-                                      (note.accidental ?? 0),
-                                );
-                                if (!target || target.barId === note.barId)
+                                const target = tieCandidate(written, note);
+                                if (
+                                  !target ||
+                                  target.barId === note.barId ||
+                                  !systemIds.has(target.barId)
+                                )
                                   return null;
                                 const sourceIndex = system.findIndex(
-                                    (b) => b.id === note.barId,
-                                  ),
-                                  targetIndex = system.findIndex(
-                                    (b) => b.id === target.barId,
-                                  );
-                                const from =
-                                  sourceIndex * measureWidth +
-                                  systemLayouts[sourceIndex].x(note.tick) +
-                                  systemLayouts[sourceIndex].step / 2 +
-                                  3;
-                                const to =
-                                  targetIndex >= 0
-                                    ? targetIndex * measureWidth +
-                                      systemLayouts[targetIndex].x(
-                                        target.tick,
-                                      ) +
-                                      systemLayouts[targetIndex].step / 2 -
-                                      3
-                                    : systemWidth - 4;
-                                const y =
-                                  chordSpace + vocalTop + vocalTieY(note);
+                                  (b) => b.id === note.barId,
+                                );
+                                const targetIndex = system.findIndex(
+                                  (b) => b.id === target.barId,
+                                );
+                                const sourceLayout = systemLayouts[sourceIndex],
+                                  targetLayout = systemLayouts[targetIndex];
                                 return (
-                                  <path
-                                    key={note.id}
-                                    className="vocal-tie engraved-tie"
-                                    data-vocal-tie={
-                                      targetIndex >= 0
-                                        ? "cross-bar"
-                                        : "outgoing"
+                                  <TabTie
+                                    key={
+                                      note.eventId +
+                                      ":" +
+                                      note.offsetTick +
+                                      ":" +
+                                      note.stringIndex
                                     }
-                                    {...symbolHelp(
-                                      "唱音延音",
-                                      "同音延续，只唱一次；跨小节时持续到续音结束。",
-                                      50,
-                                    )}
-                                    d={tieRibbonPath(
-                                      from,
-                                      to,
-                                      y,
-                                      10,
-                                      targetIndex >= 0 ? "full" : "outgoing",
-                                    )}
-                                    fill="#171715"
-                                    stroke="none"
+                                    from={
+                                      sourceIndex * measureWidth +
+                                      sourceLayout.x(note.startTick % limit) +
+                                      sourceLayout.step / 2 +
+                                      3
+                                    }
+                                    to={
+                                      targetIndex * measureWidth +
+                                      targetLayout.x(target.startTick % limit) +
+                                      targetLayout.step / 2 -
+                                      3
+                                    }
+                                    y={
+                                      chordSpace +
+                                      54 +
+                                      (5 - note.stringIndex) * rowGap
+                                    }
+                                    direction="cross-bar"
+                                    maxRise={rowGap - 13}
                                   />
                                 );
                               })}
-                          {showVocal &&
-                            vocals
-                              .filter((note) => systemIds.has(note.barId))
-                              .map((note) => {
-                                const source = vocals.find(
-                                  (n) =>
-                                    n.tieToNext &&
-                                    n.startTick + n.durationTicks ===
-                                      note.startTick &&
-                                    n.degree === note.degree &&
-                                    n.octave === note.octave &&
-                                    (n.accidental ?? 0) ===
-                                      (note.accidental ?? 0),
-                                );
-                                if (!source || systemIds.has(source.barId))
-                                  return null;
-                                const index = system.findIndex(
-                                    (b) => b.id === note.barId,
-                                  ),
-                                  from = index * measureWidth + 26,
-                                  to =
-                                    index * measureWidth +
-                                    systemLayouts[index].x(note.tick) +
-                                    systemLayouts[index].step / 2 -
-                                    3,
-                                  y = chordSpace + vocalTop + vocalTieY(note);
-                                return (
-                                  <path
-                                    key={"incoming:" + note.id}
-                                    className="vocal-tie engraved-tie"
-                                    data-vocal-tie="incoming"
-                                    {...symbolHelp(
-                                      "唱音延音",
-                                      "上一谱行同音在此继续保持。",
-                                      50,
-                                    )}
-                                    d={tieRibbonPath(
-                                      from,
-                                      to,
-                                      y,
-                                      10,
-                                      "incoming",
-                                    )}
-                                    fill="#171715"
-                                    stroke="none"
-                                  />
-                                );
-                              })}
-                          {written
-                            .filter(
-                              (note) =>
-                                note.tieToNext && systemIds.has(note.barId),
-                            )
-                            .map((note) => {
-                              const target = tieCandidate(written, note);
-                              if (
-                                !target ||
-                                target.barId === note.barId ||
-                                !systemIds.has(target.barId)
-                              )
-                                return null;
-                              const sourceIndex = system.findIndex(
-                                (b) => b.id === note.barId,
-                              );
-                              const targetIndex = system.findIndex(
-                                (b) => b.id === target.barId,
-                              );
-                              const sourceLayout = systemLayouts[sourceIndex],
-                                targetLayout = systemLayouts[targetIndex];
-                              return (
-                                <TabTie
-                                  key={
-                                    note.eventId +
-                                    ":" +
-                                    note.offsetTick +
-                                    ":" +
-                                    note.stringIndex
-                                  }
-                                  from={
-                                    sourceIndex * measureWidth +
-                                    sourceLayout.x(note.startTick % limit) +
-                                    sourceLayout.step / 2 +
-                                    3
-                                  }
-                                  to={
-                                    targetIndex * measureWidth +
-                                    targetLayout.x(target.startTick % limit) +
-                                    targetLayout.step / 2 -
-                                    3
-                                  }
-                                  y={
-                                    chordSpace +
-                                    54 +
-                                    (5 - note.stringIndex) * rowGap
-                                  }
-                                  direction="cross-bar"
-                                  maxRise={rowGap - 13}
-                                />
-                              );
-                            })}
+                          </g>
                         </svg>
                       </div>
                       {systemWidth > availableWidth + 1 && (
@@ -1466,36 +1718,36 @@ function layoutBar(
     gridPoints.push(editing.vocalSelected.tick);
   if (editing?.lyricSelected?.barId === bar.id)
     gridPoints.push(editing.lyricSelected.tick);
-  const points = [...new Set(gridPoints)].sort((a, b) => a - b);
-  const step = (width - 42) / (points.length - 1);
-  const x = (tick: number) => {
-    const end = points.findIndex((p) => p > tick);
-    if (end < 0) return width - 12;
-    if (end === 0) return 30;
-    return (
-      30 +
-      (end - 1 + (tick - points[end - 1]) / (points[end] - points[end - 1])) *
-        step
-    );
-  };
-  const tickAt = (px: number) => {
-    const position = Math.max(
-      0,
-      Math.min(points.length - 1, (px - 30 - step / 2) / step),
-    );
-    const index = Math.min(points.length - 2, Math.floor(position));
-    return Math.max(
-      0,
-      Math.min(
-        limit - 1,
-        Math.round(
-          points[index] +
-            (position - index) * (points[index + 1] - points[index]),
-        ),
-      ),
-    );
-  };
   const rhythm = barRhythm(bar, arrangement.meter, arrangement.pattern);
+  const spans: SpacingSpan[] = rhythm.tuplets
+    .filter((group) => group.complete)
+    .map((group) => ({
+      start: group.items[0].tick,
+      end: group.items.at(-1)!.tick,
+    }));
+  const vocals = [...(bar.vocalNotes ?? [])].sort((a, b) => a.tick - b.tick);
+  for (let i = 0; i < vocals.length; i++) {
+    const first = vocals[i],
+      group = vocals.slice(i, i + 3);
+    if (
+      rhythmShape(first.durationTicks)?.triplet &&
+      group.length === 3 &&
+      group.every(
+        (note, offset) =>
+          note.durationTicks === first.durationTicks &&
+          note.tick === first.tick + offset * first.durationTicks,
+      )
+    ) {
+      spans.push({ start: first.tick, end: group[2].tick });
+      i += 2;
+    }
+  }
+  const { points, step, x, tickAt } = scoreSpacing(
+    [...new Set(gridPoints)].sort((a, b) => a - b),
+    spans,
+    width,
+    limit,
+  );
   const chordRows: number[] = [];
   const diagrams: {
     eventId: string;

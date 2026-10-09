@@ -858,7 +858,11 @@ export default function ScoreLyrics({
                             event.target.value.replace(/[\r\n]+/g, " "),
                           )
                         }
-                        onPointerDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          if (event.button === 2 && !active)
+                            event.preventDefault();
+                        }}
                         onClick={(event) => event.stopPropagation()}
                         onKeyDown={(event) => onKey(event, cell.tick, verse)}
                         onKeyUp={(event) => event.stopPropagation()}

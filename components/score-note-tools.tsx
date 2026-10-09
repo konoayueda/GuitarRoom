@@ -264,6 +264,13 @@ export default function ScoreNoteTools({
           </button>
         </div>
       </div>
+      {shape?.triplet && (
+        <p className="gp-triplet-help" role="status">
+          {durationLabel(duration)}：三个音合计 {(duration * 3) / 24} 拍。
+          输入一个品位后按 →，再输入下一个音；三个音齐全后显示连梁与括号 3。
+          已有音符只改变时值，起音位置保持原位。
+        </p>
+      )}
       {help && (
         <div className="gp-shortcuts">
           <span>
