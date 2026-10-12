@@ -15,6 +15,37 @@ import { rhythmExplanation, symbolHelp } from "@/lib/score-symbols";
 export const VOCAL_LANE_HEIGHT = 104;
 export const VOCAL_BASELINE = 48;
 export const VOCAL_TIE_Y = 24;
+const VOCAL_UNDERLINE_Y = 55;
+const VOCAL_UNDERLINE_GAP = 6;
+const VOCAL_DIGIT_HALF_WIDTH = 10;
+/** Low octave dots belong below all diminution lines, never between digit and line. */
+export function vocalOctaveDotY(
+  note: Pick<VocalNote, "octave" | "durationTicks">,
+  dot = 0,
+) {
+  if (note.octave > 0) return 20 - dot * 7;
+  const beams = rhythmShape(note.durationTicks)?.beams ?? 0;
+  return beams
+    ? VOCAL_UNDERLINE_Y + (beams - 1) * VOCAL_UNDERLINE_GAP + 7 + dot * 6
+    : VOCAL_BASELINE + 7 + dot * 6;
+}
+/** Leave space for lower octave dots and tuplet brackets without a large empty lyric gap. */
+export function vocalLaneHeight(bar: Pick<ArrangementBar, "vocalNotes">) {
+  let height = 80;
+  for (const note of bar.vocalNotes ?? []) {
+    const shape = rhythmShape(note.durationTicks);
+    if (shape?.triplet) height = Math.max(height, VOCAL_LANE_HEIGHT);
+    else if (!shape) height = Math.max(height, 98);
+    if (note.degree !== 0 && note.octave < 0) {
+      height = Math.max(
+        height,
+        vocalOctaveDotY(note, Math.abs(note.octave) - 1) + 12,
+      );
+    }
+  }
+  return height;
+}
+
 /** Place the tie just above the highest octave dot, or the digit when no high dots exist. */
 export function vocalTieY(note: Pick<VocalNote, "octave">) {
   return note.octave > 0 ? 14 - (note.octave - 1) * 7 : VOCAL_TIE_Y;
@@ -47,6 +78,7 @@ type Props = {
   step: number;
   width: number;
   top: number;
+  laneHeight?: number;
   positionTick?: number;
   showLabel?: boolean;
   editing?: VocalEditing;
@@ -62,6 +94,7 @@ export default function VocalNotation({
   step,
   width,
   top,
+  laneHeight = vocalLaneHeight(bar),
   positionTick,
   showLabel = true,
   editing,
@@ -71,12 +104,18 @@ export default function VocalNotation({
     .sort((a, b) => a.tick - b.tick)
     .map((note) => ({ note, shape: rhythmShape(note.durationTicks) }));
   const center = (tick: number) => x(tick) + step / 2;
-  const underlineY = (level: number) => 70 + level * 6;
+  const underlineY = (level: number) =>
+    VOCAL_UNDERLINE_Y + level * VOCAL_UNDERLINE_GAP;
   const selectedTick =
     editing?.selected?.barId === bar.id ? editing.selected.tick : undefined;
   const cursorWidth = Math.min(30, Math.max(18, step));
   const groups = beamGroups(items, meter);
   const tuplets = tupletGroups(items);
+  const underlineRuns = groups.flatMap(beamRuns);
+  const quantum = Math.max(1, Math.round(editing?.gridStep ?? 1));
+  const inputPoints = editing
+    ? Array.from({ length: Math.ceil(limit / quantum) }, (_, i) => i * quantum)
+    : points;
 
   function select(event: MouseEvent<SVGGElement>, tick: number) {
     event.stopPropagation();
@@ -93,11 +132,10 @@ export default function VocalNotation({
     const local = new DOMPoint(event.clientX, event.clientY).matrixTransform(
       matrix.inverse(),
     );
-    const quantum = Math.max(1, editing.gridStep);
     const tick = Math.max(
       0,
       Math.min(
-        limit - 1,
+        Math.floor((limit - 1) / quantum) * quantum,
         Math.round(editing.tickAt(local.x) / quantum) * quantum,
       ),
     );
@@ -140,16 +178,41 @@ export default function VocalNotation({
             x="26"
             y="0"
             width={Math.max(0, width - 34)}
-            height={VOCAL_LANE_HEIGHT}
+            height={laneHeight}
             fill="transparent"
           />
-          {points
+          {items
+            .filter(({ note }) => note.degree !== 0)
+            .map(({ note }) => (
+              <rect
+                key={note.id}
+                data-vocal-span={note.id}
+                data-vocal-span-start={note.tick}
+                data-vocal-span-end={Math.min(
+                  limit,
+                  note.tick + note.durationTicks,
+                )}
+                x={center(note.tick)}
+                y="23"
+                width={Math.max(
+                  0,
+                  center(Math.min(limit, note.tick + note.durationTicks)) -
+                    center(note.tick),
+                )}
+                height={Math.max(42, laneHeight - 31)}
+                fill="#b4684a"
+                opacity="0.07"
+                pointerEvents="none"
+              />
+            ))}
+          {inputPoints
             .filter((tick) => tick < limit)
             .map((tick) => (
               <circle
                 key={tick}
+                data-vocal-grid-tick={tick}
                 cx={center(tick)}
-                cy="88"
+                cy={laneHeight - 5}
                 r="1.2"
                 fill="currentColor"
                 opacity="0.12"
@@ -177,7 +240,7 @@ export default function VocalNotation({
           x={center(selectedTick) - cursorWidth / 2}
           y="23"
           width={cursorWidth}
-          height="60"
+          height={Math.max(42, laneHeight - 31)}
           rx="4"
           fill="#b4684a"
           fillOpacity="0.07"
@@ -243,7 +306,12 @@ export default function VocalNotation({
                 x={px - 12}
                 y="22"
                 width="24"
-                height="42"
+                height={Math.max(
+                  42,
+                  note.degree !== 0 && note.octave < 0
+                    ? vocalOctaveDotY(note, Math.abs(note.octave) - 1) - 19
+                    : 42,
+                )}
                 fill="transparent"
               />
               <text
@@ -286,7 +354,8 @@ export default function VocalNotation({
                       45,
                     )}
                     cx={px}
-                    cy={note.octave > 0 ? 20 - dot * 7 : 57 + dot * 6}
+                    data-vocal-octave-dot={note.octave > 0 ? "high" : "low"}
+                    cy={vocalOctaveDotY(note, dot)}
                     r="2.1"
                   />
                 ))}
@@ -362,44 +431,42 @@ export default function VocalNotation({
           </g>
         );
       })}
-      {groups.map((group, gi) => (
-        <g key={gi} data-vocal-beam-group={gi}>
-          {group.flatMap((item, index) =>
-            Array.from({ length: item.shape!.beams }, (_, level) => {
-              const next = group[index + 1];
-              const previous = group[index - 1];
-              const px = center(item.note.tick);
-              const connectedNext = next && next.shape!.beams > level;
-              const connectedPrevious =
-                previous && previous.shape!.beams > level;
-              if (!connectedNext && connectedPrevious) return null;
-              const from = connectedPrevious ? px : px - 10;
-              const to = connectedNext
-                ? center(next.note.tick) +
-                  (group[index + 2]?.shape!.beams > level ? 0 : 10)
-                : px + 10;
-              return (
-                <line
-                  key={index + ":" + level}
-                  className="vocal-underline"
-                  {...symbolHelp(
-                    "唱音减时线",
-                    "数字下方一条横线表示八分音符，两条表示十六分，三条表示三十二分；连线将同一拍内的节奏分组。",
-                    35,
-                  )}
-                  data-vocal-underline={level + 1}
-                  x1={from}
-                  x2={to}
-                  y1={underlineY(level)}
-                  y2={underlineY(level)}
-                  stroke="#171715"
-                  strokeWidth="1.6"
-                />
-              );
-            }),
+      {underlineRuns.map(({ level, first, last, groupIndex }, index) => (
+        <line
+          key={index}
+          className="vocal-underline"
+          {...symbolHelp(
+            "唱音减时线",
+            "数字下方一条横线表示八分音符，两条表示十六分，三条表示三十二分；连线将同一拍内的节奏分组。",
+            35,
           )}
-        </g>
+          data-vocal-beam-group={groupIndex}
+          data-vocal-underline={level + 1}
+          data-vocal-underline-start={first.note.tick}
+          data-vocal-underline-end={last.note.tick}
+          x1={center(first.note.tick) - VOCAL_DIGIT_HALF_WIDTH}
+          x2={center(last.note.tick) + VOCAL_DIGIT_HALF_WIDTH}
+          y1={underlineY(level)}
+          y2={underlineY(level)}
+          stroke="#171715"
+          strokeWidth="1.6"
+        />
       ))}
+      <line
+        className="vocal-barline"
+        {...symbolHelp(
+          "唱音小节线",
+          "与上方吉他谱共用拍号和小节边界；唱音节奏独立于吉他拨弦。",
+          3,
+        )}
+        data-vocal-barline={bar.id}
+        x1={width}
+        x2={width}
+        y1="14"
+        y2={Math.min(laneHeight - 12, 78)}
+        stroke="#171715"
+        strokeWidth="1.2"
+      />
       {tuplets.map((group, index) => {
         const from = center(group.items[0].note.tick) - 10;
         const to = center(group.items.at(-1)!.note.tick) + 10;
@@ -432,6 +499,32 @@ export default function VocalNotation({
       })}
     </g>
   );
+}
+
+/** One stroke per continuous underline avoids doubled overlaps at mixed values. */
+function beamRuns(group: VocalItem[], groupIndex: number) {
+  const runs: {
+    level: number;
+    first: VocalItem;
+    last: VocalItem;
+    groupIndex: number;
+  }[] = [];
+  const levels = Math.max(0, ...group.map((item) => item.shape?.beams ?? 0));
+  for (let level = 0; level < levels; level++) {
+    let first: VocalItem | undefined;
+    let last: VocalItem | undefined;
+    for (const item of group) {
+      if ((item.shape?.beams ?? 0) > level) {
+        first ??= item;
+        last = item;
+      } else if (first && last) {
+        runs.push({ level, first, last, groupIndex });
+        first = last = undefined;
+      }
+    }
+    if (first && last) runs.push({ level, first, last, groupIndex });
+  }
+  return runs;
 }
 
 function samePitch(a: VocalNote, b: VocalNote) {

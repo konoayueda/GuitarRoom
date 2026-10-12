@@ -252,6 +252,7 @@ export default function RhythmNotation({
       {rhythm.tuplets.map((group, i) => {
         const first = group.items[0],
           last = group.items.at(-1)!,
+          restOnly = group.items.every((item) => item.rest),
           x1 = stemX(first) - 8,
           x2 = stemX(last) + 12,
           py = beamY(first) + 16,
@@ -259,14 +260,22 @@ export default function RhythmNotation({
         return (
           <g
             {...symbolHelp(
-              group.complete ? "三连音" : "三连音时值（未成完整组）",
               group.complete
-                ? "三个等长时值占通常两个的时间，组内可以包含休止符。"
-                : "3:2 表示连音比例；这里暂未形成完整的三个等长时值。",
+                ? "三连音"
+                : restOnly
+                  ? "休止三连音时值"
+                  : "三连音时值（未成完整组）",
+              group.complete
+                ? "按 3:2 的比例演奏这组时值，组内可混合不同长短的音符和休止符，并不一定拨响三个音。"
+                : restOnly
+                  ? "这个休止按 3:2 的比例计算时长；它不表示新增的一组三个音。"
+                  : "3:2 表示连音比例；组内可混合音符和休止符，这里尚未覆盖完整的一组时值。",
               30,
             )}
             key={i}
             data-tuplet={group.complete ? "complete" : "partial"}
+            data-tuplet-items={group.items.length}
+            data-tuplet-rests={group.items.filter((item) => item.rest).length}
           >
             {group.complete && (
               <path

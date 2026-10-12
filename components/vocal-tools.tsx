@@ -8,7 +8,14 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Choice } from "./room-controls";
-import { RHYTHMS, durationLabel, type Arrangement } from "@/lib/arrangement";
+import LyricFontSizeControl from "./lyric-font-size-control";
+import { MAX_LYRIC_HORIZONTAL_OFFSET } from "@/lib/lyric-style";
+import {
+  RHYTHMS,
+  GRID_OPTIONS,
+  durationLabel,
+  type Arrangement,
+} from "@/lib/arrangement";
 import type { ArrangementVocalNote, ArrangementLyric } from "@/lib/arrangement";
 
 export default function VocalTools({
@@ -32,10 +39,18 @@ export default function VocalTools({
   lyric,
   lyricBound,
   onLyricLayout,
+  lyricFontSize,
+  onLyricFontSize,
   lyricEndOptions,
   onLyricExtend,
+  onAlignPhrase,
+  phraseLength,
   vocal,
   vocalDuration,
+  inputStatus,
+  gridLabel,
+  grid,
+  onGrid,
   onDuration,
   onPitch,
   onFocus,
@@ -68,10 +83,22 @@ export default function VocalTools({
   lyric?: ArrangementLyric;
   lyricBound: boolean;
   onLyricLayout: (x: number, y: number) => void;
+  lyricFontSize?: number;
+  onLyricFontSize: (size: number) => void;
   lyricEndOptions: { value: string; label: string }[];
   onLyricExtend: (id?: string) => void;
+  onAlignPhrase: () => void;
+  phraseLength: number;
   vocal?: ArrangementVocalNote;
   vocalDuration: number;
+  inputStatus?: {
+    fits: boolean;
+    reason: string;
+    suggestedDuration?: number;
+  };
+  gridLabel: string;
+  grid: string;
+  onGrid: (value: string) => void;
   onDuration: (n: number) => void;
   onPitch: (
     patch: Partial<
@@ -99,21 +126,20 @@ export default function VocalTools({
         }
       : undefined;
   const layout = lane === "lyrics" && lyricMode === "layout";
-  function offsetInput(axis: "X" | "Y") {
-    const current =
-      axis === "X" ? (lyric?.offsetX ?? 0) : (lyric?.offsetY ?? 0);
-    const limit = axis === "X" ? 96 : 24;
+  function offsetInput() {
+    const current = lyric?.offsetX ?? 0;
+    const limit = MAX_LYRIC_HORIZONTAL_OFFSET;
     return (
       <label>
-        {axis === "X" ? "水平偏移" : "垂直偏移"}
+        水平偏移
         <input
-          aria-label={axis === "X" ? "歌词水平偏移" : "歌词垂直偏移"}
+          aria-label="歌词水平偏移"
           type="number"
           min={-limit}
           max={limit}
           step="1"
           disabled={locked || !lyric}
-          key={barId + ":" + tick + ":" + verse + ":" + axis + ":" + current}
+          key={barId + ":" + tick + ":" + verse + ":" + current}
           defaultValue={current}
           onBlur={(e) => {
             const n = Number(e.target.value);
@@ -123,10 +149,7 @@ export default function VocalTools({
               n >= -limit &&
               n <= limit
             )
-              onLyricLayout(
-                axis === "X" ? n : (lyric?.offsetX ?? 0),
-                axis === "Y" ? n : (lyric?.offsetY ?? 0),
-              );
+              onLyricLayout(n, lyric?.offsetY ?? 0);
             else e.target.value = String(current);
           }}
           onKeyDown={(e) => {
@@ -155,15 +178,22 @@ export default function VocalTools({
             <button
               className="button secondary-button"
               aria-label="调整起唱"
+              title={
+                lyricBound
+                  ? "修改起唱时间会同时移动关联唱音；只调整文字位置请选择调整排版。"
+                  : "修改歌词的起唱时间；只调整文字位置请选择调整排版。"
+              }
               aria-pressed={lyricMode === "time"}
               disabled={locked}
               onClick={() => onLyricMode("time")}
             >
               调整起唱
+              {lyricBound && "（联动唱音）"}
             </button>
             <button
               className="button secondary-button"
               aria-label="调整排版"
+              title="只左右移动文字，唱音与节奏保持不变。"
               aria-pressed={lyricMode === "layout"}
               disabled={locked}
               onClick={() => onLyricMode("layout")}
@@ -174,8 +204,7 @@ export default function VocalTools({
         )}
         {layout ? (
           <>
-            {offsetInput("X")}
-            {offsetInput("Y")}
+            {offsetInput()}
             <button
               className="button secondary-button"
               aria-label="重置歌词排版"
@@ -245,6 +274,14 @@ export default function VocalTools({
               <ChevronRight size={14} />
             </button>
           </>
+        )}
+        {lane === "lyrics" && (
+          <LyricFontSizeControl
+            value={lyricFontSize}
+            onChange={onLyricFontSize}
+            disabled={locked}
+            title="调整整份编排的歌词字号，保存编排后沿用。"
+          />
         )}
         <div className="vocal-tool-history">
           <button
@@ -348,6 +385,17 @@ export default function VocalTools({
               />
             </label>
             <label>
+              输入网格
+              <Choice
+                onCloseAutoFocus={closeMenu}
+                disabled={locked}
+                label="唱音输入网格"
+                value={grid}
+                onChange={onGrid}
+                options={GRID_OPTIONS}
+              />
+            </label>
+            <label>
               时值
               <Choice
                 onCloseAutoFocus={closeMenu}
@@ -373,8 +421,9 @@ export default function VocalTools({
             </label>
             <button
               className="button primary"
-              disabled={locked || !barId}
+              disabled={locked || !barId || inputStatus?.fits === false}
               aria-label="写入唱音"
+              title={inputStatus?.reason}
               onClick={() => onPitch({})}
             >
               <Plus size={15} />
@@ -447,6 +496,15 @@ export default function VocalTools({
               />
             </label>
             <button
+              className="button primary"
+              disabled={locked || phraseLength < 2}
+              aria-label="逐字对齐唱音"
+              title="将当前整句歌词按字分配到后续唱音；跳过休止和同音延音续音。"
+              onClick={onAlignPhrase}
+            >
+              逐字对齐唱音
+            </button>
+            <button
               className="button secondary-button"
               disabled={locked || lineCount >= 8}
               aria-label="添加歌词行"
@@ -475,15 +533,34 @@ export default function VocalTools({
           </>
         )}
       </div>
+      {lane === "vocal" && inputStatus && (
+        <div
+          className="vocal-input-status"
+          data-vocal-input-status={inputStatus.fits ? "available" : "blocked"}
+          role="status"
+        >
+          <span>{inputStatus.reason}</span>
+          {inputStatus.suggestedDuration !== undefined && (
+            <button
+              className="button secondary-button"
+              disabled={locked}
+              aria-label={`使用${durationLabel(inputStatus.suggestedDuration)}`}
+              onClick={() => onDuration(inputStatus.suggestedDuration!)}
+            >
+              使用{durationLabel(inputStatus.suggestedDuration)}
+            </button>
+          )}
+        </div>
+      )}
       <p>
         {lane === "vocal"
-          ? "点击唱音行定位，输入 1–7 写音高，0 写休止；← → 换位置，↑ ↓ 换八度，L 延音。音下单线是八分，双线是十六分。"
+          ? `先选时值，再输入 1–7 写音高、0 写休止；→ 接着写，↑ ↓ 换八度，L 连接同音延音。点击按${gridLabel}网格定位，也可用「起唱拍位」精确定位。音下单线是八分、双线是十六分；歌词写在起唱音下，续音处可留空。`
           : layout
-            ? "拖动歌词小柄或用方向键调整文字排版，起唱时间保持不变。水平、垂直偏移可重置；Tab 接着填，Enter 换行。"
+            ? "左右拖动歌词小柄或用左右方向键调整文字位置，歌词行、唱音与起唱时间保持不变。水平偏移可重置；字号作用于整份歌词，Tab 接着填，Enter 换行。"
             : lyricBound
-              ? "当前歌词跟随唱音。调整起唱会同时移动唱音和关联歌词；选择延唱末音可标记一字多音。Tab 接着填，Enter 换行。"
+              ? "当前歌词跟随唱音。整句填写后点「逐字对齐唱音」，每个字分配到后续起唱音；休止与同音续音留空。调整起唱会同时移动唱音和关联歌词；选择延唱末音可标记一字多音。Tab 接着填，Enter 换行。"
               : lyricAnchor === "auto"
-                ? "点击当前歌词行填写，歌词会跟随同拍唱音；可以先写词再补唱音。拖动小柄调整起唱，Tab 接着填，Enter 换行。"
+                ? "点击当前歌词行填写，歌词会跟随同拍唱音；整句可点「逐字对齐唱音」分配，先写词时需补好唱音再使用。拖动小柄调整起唱，Tab 接着填，Enter 换行。"
                 : "当前歌词独立起唱，可放在拍内任意时刻，移动唱音不会带动它。拖动小柄调整起唱，Tab 接着填，Enter 换行。"}
       </p>
     </div>

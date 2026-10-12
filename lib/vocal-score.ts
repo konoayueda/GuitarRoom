@@ -2,6 +2,7 @@ import {
   arrangementSchema,
   barTicks,
   listBars,
+  RHYTHMS,
   sameVocalPitch,
   writtenVocalNotes,
   repairVocalLinks,
@@ -132,6 +133,12 @@ function checked(a: Arrangement): Arrangement {
     );
   return result;
 }
+function checkedLyrics(a: Arrangement): Arrangement {
+  const valid = arrangementSchema.safeParse(a);
+  if (!valid.success)
+    throw Error(valid.error.issues[0]?.message ?? "歌词内容不符合曲谱规则。");
+  return a;
+}
 function freeLyric(lyric: ArrangementLyric): ArrangementLyric {
   const result = { ...lyric, anchorMode: "free" as const };
   delete result.vocalNoteId;
@@ -151,7 +158,7 @@ function replaceLyric(
   verse: number,
   lyric?: ArrangementLyric,
 ): Arrangement {
-  return checked({
+  return checkedLyrics({
     ...a,
     sections: a.sections.map((section) => ({
       ...section,
@@ -215,6 +222,113 @@ export function setLyricAnchor(
   }
   if (JSON.stringify(previous) === JSON.stringify(lyric)) return a;
   return replaceLyric(a, barId, tick, verse, lyric);
+}
+/** Keep spaces and punctuation while assigning each written character to a vocal. */
+export function lyricSyllables(text: string): string[] {
+  const characters = Array.from(
+    new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+    (part) => part.segment,
+  );
+  const syllables: string[] = [];
+  let pending = "";
+  for (const character of characters) {
+    if (/^\s+$/u.test(character)) pending += character;
+    else if (/^\p{P}+$/u.test(character)) {
+      if (syllables.length) {
+        syllables[syllables.length - 1] += pending + character;
+        pending = "";
+      } else pending += character;
+    } else {
+      syllables.push(pending + character);
+      pending = "";
+    }
+  }
+  if (pending && syllables.length) syllables[syllables.length - 1] += pending;
+  return syllables;
+}
+
+/** Distribute a selected phrase without changing voices or overwriting other lyrics. */
+export function alignLyricPhrase(
+  a: Arrangement,
+  barId: string,
+  tick: number,
+  verse: number,
+) {
+  const start = location(a, barId, tick);
+  const source = lyricAt(a, barId, tick, verse);
+  if (!source) throw Error("请先选中要逐字对齐的歌词。");
+  const syllables = lyricSyllables(source.text);
+  if (syllables.length < 2) throw Error("请先在一个歌词框中填写整句歌词。");
+  const notes = writtenVocalNotes(a);
+  const targets = notes.filter((note, index) => {
+    if (note.degree === 0 || note.startTick < start) return false;
+    const previous = notes[index - 1];
+    return !(
+      previous?.tieToNext &&
+      previous.startTick + previous.durationTicks === note.startTick &&
+      sameVocalPitch(previous, note)
+    );
+  });
+  if (targets.length < syllables.length)
+    throw Error(
+      `这句歌词有 ${syllables.length} 个字，后面只有 ${targets.length} 个可起唱音。请先补充唱音，或将歌词分成较短的句子。`,
+    );
+  const chosen = targets.slice(0, syllables.length);
+  if (
+    chosen.some((note) =>
+      listBars(a)
+        .find((item) => item.bar.id === note.barId)
+        ?.bar.lyrics?.some(
+          (lyric) =>
+            lyric.verse === verse &&
+            lyric.tick === note.tick &&
+            !(note.barId === barId && lyric.tick === tick),
+        ),
+    )
+  )
+    throw Error(
+      "目标唱音下方已有本行歌词，请先移动或清除那些歌词，再逐字对齐。",
+    );
+  const next: Arrangement = {
+    ...a,
+    sections: a.sections.map((section) => ({
+      ...section,
+      bars: section.bars.map((bar) => {
+        const additions = chosen.flatMap((note, index) =>
+          note.barId === bar.id
+            ? [
+                {
+                  tick: note.tick,
+                  verse,
+                  text: syllables[index],
+                  anchorMode: "auto" as const,
+                  vocalNoteId: note.id,
+                },
+              ]
+            : [],
+        );
+        if (!additions.length && bar.id !== barId) return bar;
+        const lyrics = (bar.lyrics ?? []).filter(
+          (lyric) =>
+            !(bar.id === barId && lyric.tick === tick && lyric.verse === verse),
+        );
+        return {
+          ...bar,
+          lyrics: [...lyrics, ...additions].sort(
+            (left, right) => left.tick - right.tick || left.verse - right.verse,
+          ),
+        };
+      }),
+    })),
+  };
+  const valid = arrangementSchema.safeParse(next);
+  if (!valid.success)
+    throw Error(valid.error.issues[0]?.message ?? "歌词分配的位置无效。");
+  return {
+    arrangement: next,
+    cursor: { barId: chosen[0].barId, tick: chosen[0].tick, verse },
+    count: syllables.length,
+  };
 }
 export function setLyricLayout(
   a: Arrangement,
@@ -356,7 +470,7 @@ export function setLyricPosition(
     )
   )
     throw Error("该位置已有歌词，请选择空白位置。");
-  return checked({
+  return checkedLyrics({
     ...a,
     sections: a.sections.map((section) => ({
       ...section,
@@ -396,6 +510,69 @@ export function vocalNoteDuration(a: Arrangement, barId: string, tick: number) {
   return notes.length
     ? notes.reduce((sum, note) => sum + note.durationTicks, 0)
     : undefined;
+}
+export type VocalEditOptions = { scope?: "chain" | "segment" };
+function ownedVocalNotes(
+  a: Arrangement,
+  barId: string,
+  tick: number,
+  options: VocalEditOptions,
+) {
+  const notes = chain(a, barId, tick);
+  return options.scope === "segment" ? notes.slice(0, 1) : notes;
+}
+export type VocalInputAvailability = {
+  availableTicks: number;
+  fits: boolean;
+  boundary: "note" | "score";
+  coveredBy?: WrittenVocalNote;
+  suggestedDuration?: number;
+};
+
+/** Report space for one vocal without changing existing notes or their ties. */
+export function vocalInputAvailability(
+  a: Arrangement,
+  barId: string,
+  tick: number,
+  durationTicks: number,
+  options: VocalEditOptions = {},
+): VocalInputAvailability {
+  const start = location(a, barId, tick);
+  const owned = new Set(
+    ownedVocalNotes(a, barId, tick, options).map((note) => note.id),
+  );
+  const sounding = writtenVocalNotes(a).filter(
+    (note) => note.degree !== 0 && !owned.has(note.id),
+  );
+  const coveredBy = sounding.find(
+    (note) =>
+      note.startTick < start && note.startTick + note.durationTicks > start,
+  );
+  if (coveredBy)
+    return { availableTicks: 0, fits: false, boundary: "note", coveredBy };
+  const next = sounding.find((note) => note.startTick >= start);
+  const availableTicks =
+    (next?.startTick ?? listBars(a).length * barTicks(a.meter)) - start;
+  const fits =
+    Number.isInteger(durationTicks) &&
+    durationTicks > 0 &&
+    durationTicks <= availableTicks;
+  const maximum = Math.min(durationTicks, availableTicks, 96);
+  const suggestedDuration = fits
+    ? undefined
+    : RHYTHMS.reduce<number | undefined>(
+        (largest, rhythm) =>
+          rhythm.ticks <= maximum && rhythm.ticks > (largest ?? 0)
+            ? rhythm.ticks
+            : largest,
+        undefined,
+      );
+  return {
+    availableTicks,
+    fits,
+    boundary: next ? "note" : "score",
+    ...(suggestedDuration !== undefined ? { suggestedDuration } : {}),
+  };
 }
 function without(a: Arrangement, ids: Set<string>): Arrangement {
   return {
@@ -543,9 +720,10 @@ export function setVocalNote(
     VocalNote,
     "degree" | "octave" | "accidental" | "durationTicks" | "tieToNext"
   >,
+  options: VocalEditOptions = {},
 ): Arrangement {
   const start = location(a, barId, tick),
-    owned = chain(a, barId, tick),
+    owned = ownedVocalNotes(a, barId, tick, options),
     existing = owned[0];
   const currentDuration = owned.reduce(
     (sum, note) => sum + note.durationTicks,
@@ -554,15 +732,22 @@ export function setVocalNote(
   if (patch.durationTicks > 96 && patch.durationTicks !== currentDuration)
     throw Error("一次输入的唱音时值最多为全音符，较长延音请连接续音。");
   const protectedIds = protectedVocalIds(a);
+  const keepTie =
+    options.scope === "segment" &&
+    patch.tieToNext === undefined &&
+    existing?.tieToNext &&
+    patch.durationTicks === existing.durationTicks &&
+    sameVocalPitch({ ...existing, ...patch }, existing);
   const inserted = insert(
     without(a, new Set(owned.map((note) => note.id))),
     start,
-    patch,
+    keepTie ? { ...patch, tieToNext: true } : patch,
     existing?.id,
     owned.map((note) => ({
       start: note.startTick,
       id: note.id,
-      split: protectedIds.has(note.id),
+      split:
+        patch.durationTicks === currentDuration || protectedIds.has(note.id),
     })),
   );
   return checked(lyricsAfterVocalEdit(a, inserted));
@@ -590,7 +775,6 @@ export function moveVocalNote(
     root = owned[0];
   if (!root) throw Error("请先选择要移动的唱音。");
   if (newAbsoluteTick === root.startTick) return a;
-  const protectedIds = protectedVocalIds(a);
   const inserted = insert(
     without(a, new Set(owned.map((note) => note.id))),
     newAbsoluteTick,
@@ -604,7 +788,7 @@ export function moveVocalNote(
     owned.map((note) => ({
       start: newAbsoluteTick + note.startTick - root.startTick,
       id: note.id,
-      split: protectedIds.has(note.id),
+      split: true,
     })),
   );
   return checked(lyricsAfterVocalEdit(a, inserted));

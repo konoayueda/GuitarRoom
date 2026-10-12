@@ -1,6 +1,7 @@
 "use client";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -19,11 +20,17 @@ import {
   type ArrangementBar,
 } from "@/lib/arrangement";
 import { tieRibbonPath } from "@/lib/tie-engraving";
+import { engraveScore } from "@/lib/score-engraving";
 import { barRhythm, rhythmShape } from "@/lib/notation";
-import { scoreSpacing, type SpacingSpan } from "@/lib/score-spacing";
+import {
+  scoreSpacing,
+  minimumEditorMeasureWidth,
+  type SpacingSpan,
+} from "@/lib/score-spacing";
 import type { TickSpan } from "@/lib/score-editing";
+import { resolveLyricFontSize } from "@/lib/lyric-style";
 import RhythmNotation from "./rhythm-notation";
-import VocalNotation, { VOCAL_LANE_HEIGHT, vocalTieY } from "./vocal-notation";
+import VocalNotation, { vocalLaneHeight, vocalTieY } from "./vocal-notation";
 import {
   lyricLineCount,
   writtenVocalNotes,
@@ -34,10 +41,12 @@ import ScoreStaffStart, { SCORE_STAFF_START_WIDTH } from "./score-staff-start";
 import ScoreSymbolHelp from "./score-symbol-help";
 import ScoreLyrics, {
   scoreLyricsRowHeights,
+  scoreLyricsRowInsets,
   scoreLyricsHorizontalBounds,
+  scoreLyricsHitRanges,
   type LyricExtension,
 } from "./score-lyrics";
-import { symbolHelp, noteHelp } from "@/lib/score-symbols";
+import { symbolHelp, noteHelp, rhythmExplanation } from "@/lib/score-symbols";
 import type { PlaybackPosition } from "./arrangement-player";
 
 export type ScoreSelection = {
@@ -47,7 +56,12 @@ export type ScoreSelection = {
   stringIndex?: number;
 };
 export type ScoreContextTarget =
-  | { kind: "guitar" | "chord"; selection: ScoreSelection }
+  | {
+      kind: "guitar";
+      selection: ScoreSelection;
+      sourceSelection?: ScoreSelection;
+    }
+  | { kind: "chord"; selection: ScoreSelection }
   | { kind: "vocal"; barId: string; tick: number }
   | { kind: "lyrics"; barId: string; tick: number; verse: number }
   | { kind: "bar" | "score"; barId: string };
@@ -72,6 +86,8 @@ export type ScoreEditing = {
     text: string,
   ) => void;
   onLyricBegin: (barId: string, tick: number, verse: number) => void;
+  onLyricEnd?: () => void;
+  onLyricHistory?: (command: "undo" | "redo") => void;
   lyricSelected?: { barId: string; tick: number; verse: number };
   onLyricSelect: (barId: string, tick: number, verse: number) => void;
   onLyricMove: (
@@ -99,12 +115,13 @@ export type ScoreEditing = {
   ) => void;
 };
 export default function ArrangementPreview({
-  arrangement,
+  arrangement: sourceArrangement,
   title,
   capo,
   position,
   onSelect,
   editing,
+  lyricFontSize: displayLyricFontSize,
 }: {
   arrangement: Arrangement;
   title: string;
@@ -112,7 +129,19 @@ export default function ArrangementPreview({
   position?: PlaybackPosition | null;
   onSelect?: (barId: string, eventId: string) => void;
   editing?: ScoreEditing;
+  lyricFontSize?: number;
 }) {
+  const lyricFontSize = resolveLyricFontSize(
+    displayLyricFontSize ?? sourceArrangement.lyricFontSize,
+  );
+  const { arrangement, origins, continuations } = useMemo(
+    () => engraveScore(sourceArrangement),
+    [sourceArrangement],
+  );
+  const sourceSelection = (selection: ScoreSelection): ScoreSelection =>
+    origins.get(
+      selection.eventId + ":" + selection.tick + ":" + selection.stringIndex,
+    ) ?? selection;
   const root = useRef<HTMLDivElement>(null);
   const [availableWidth, setAvailableWidth] = useState(960);
   useEffect(() => {
@@ -154,26 +183,43 @@ export default function ArrangementPreview({
       }
     }
   }
+  // Widen the shared musical layout for large lyrics rather than moving words
+  // off their onsets or allowing adjacent syllables to overlap.
   const sectionWidths = new Map(
-    arrangement.sections.map((s) => [
-      s.id,
-      Math.max(
-        editing ? 480 : 336,
-        ...s.bars.map(
-          (b) =>
-            (barGridPoints(
-              b,
-              editing?.gridStep ?? 12,
-              Math.max(
-                limit,
-                b.events.reduce((n, e) => n + e.durationTicks, 0),
-              ),
-              arrangement.pattern,
-            ).length -
-              1) *
-              34 +
-            42,
-        ),
+    (editing ? sourceArrangement : arrangement).sections.map((section) => [
+      section.id,
+      Math.ceil(
+        Math.max(
+          editing ? 480 : 336,
+          ...section.bars.map((bar) => {
+            const ticks = Math.max(
+              limit,
+              bar.events.reduce((n, event) => n + event.durationTicks, 0),
+            );
+            if (editing) {
+              let offset = 0;
+              const guitarOnsets = bar.events.flatMap((event) => {
+                const start = offset;
+                offset += event.durationTicks;
+                return eventAttacks(event, sourceArrangement.pattern).map(
+                  (note) => start + note.offsetTick,
+                );
+              });
+              return minimumEditorMeasureWidth(
+                [guitarOnsets, (bar.vocalNotes ?? []).map((note) => note.tick)],
+                ticks,
+              );
+            }
+            return (
+              (barGridPoints(bar, 12, ticks, arrangement.pattern).length - 1) *
+                34 +
+              42
+            );
+          }),
+        ) *
+          (section.bars.some((bar) => bar.lyrics?.length)
+            ? Math.max(1, (lyricFontSize + 8) / 34)
+            : 1),
       ),
     ]),
   );
@@ -243,7 +289,9 @@ export default function ArrangementPreview({
         <div className="tab-preview-meta">
           <span>{arrangement.meter}</span>
           <span>♩ = {arrangement.bpm || "—"}</span>
-          <span>{arrangement.pattern === "strum" ? "扫弦" : "分解和弦"}</span>
+          <span>
+            {arrangement.pattern === "strum" ? "整组和弦" : "分解和弦"}
+          </span>
           <span>Capo {capo}</span>
           {showVocal && <span>唱音 1 = {arrangement.vocalKey ?? "C"}</span>}
         </div>
@@ -302,21 +350,51 @@ export default function ArrangementPreview({
                     firstIndex,
                     firstIndex + system.length,
                   );
+                  const upperOctaves = Math.max(
+                    0,
+                    ...system.flatMap((bar) =>
+                      (bar.vocalNotes ?? []).map((note) => note.octave),
+                    ),
+                  );
                   const vocalTop =
                     staffBottom +
                     Math.max(...systemLayouts.map((l) => l.rhythm.lanes)) * 44 +
-                    66;
-                  const lyricsTop =
-                    vocalTop + (showVocal ? VOCAL_LANE_HEIGHT : 0);
+                    (editing ? 38 : 18) +
+                    upperOctaves * 7;
+                  const vocalHeight = Math.max(...system.map(vocalLaneHeight));
+                  const lyricsTop = vocalTop + (showVocal ? vocalHeight : 0);
                   const lyricRows = system.map((bar, i) =>
                     scoreLyricsRowHeights({
                       bar,
                       ...systemLayouts[i],
                       lineCount: lines,
+                      fontSize: lyricFontSize,
                     }),
                   );
-                  const rowHeights = Array.from({ length: lines }, (_, verse) =>
-                    Math.max(...lyricRows.map((h) => h[verse] ?? 28)),
+                  const lyricInsets = system.map((bar, i) =>
+                    scoreLyricsRowInsets({
+                      bar,
+                      ...systemLayouts[i],
+                      lineCount: lines,
+                      fontSize: lyricFontSize,
+                    }),
+                  );
+                  const rowInsets = Array.from({ length: lines }, (_, verse) =>
+                    Math.max(
+                      ...lyricInsets.map((insets) => insets[verse] ?? 0),
+                    ),
+                  );
+                  const rowHeights = Array.from(
+                    { length: lines },
+                    (_, verse) =>
+                      rowInsets[verse] +
+                      Math.max(
+                        ...lyricRows.map(
+                          (heights, i) =>
+                            (heights[verse] ?? 44) -
+                            (lyricInsets[i][verse] ?? 0),
+                        ),
+                      ),
                   );
                   const lyricsHeight =
                     10 + rowHeights.reduce((sum, h) => sum + h, 0);
@@ -324,7 +402,12 @@ export default function ArrangementPreview({
                   const systemWidth = SCORE_STAFF_START_WIDTH + measuresWidth;
                   const lyricBounds = system.map((bar, i) => {
                     const bounds = scoreLyricsHorizontalBounds(
-                      { bar, ...systemLayouts[i], lineCount: lines },
+                      {
+                        bar,
+                        ...systemLayouts[i],
+                        lineCount: lines,
+                        fontSize: lyricFontSize,
+                      },
                       !!editing,
                     );
                     return {
@@ -338,6 +421,18 @@ export default function ArrangementPreview({
                         bounds.right,
                     };
                   });
+                  const systemLyricHitRanges = system.flatMap((bar, i) =>
+                    scoreLyricsHitRanges({
+                      bar,
+                      ...systemLayouts[i],
+                      lineCount: lines,
+                      fontSize: lyricFontSize,
+                    }).map((range) => ({
+                      ...range,
+                      left: range.left + i * measureWidth,
+                      right: range.right + i * measureWidth,
+                    })),
+                  );
                   const leftPadding = Math.max(
                     0,
                     Math.ceil(8 - Math.min(...lyricBounds.map((b) => b.left))),
@@ -429,6 +524,7 @@ export default function ArrangementPreview({
                                 rhythm,
                                 diagrams,
                                 tickAt,
+                                cellBounds,
                               } = layouts[bi];
                               const active = soundingBar === bar.id;
                               let offset = 0;
@@ -592,6 +688,14 @@ export default function ArrangementPreview({
                                                     selectedEvent.durationTicks),
                                                 stringIndex,
                                               },
+                                              sourceSelection: sourceSelection({
+                                                ...selection,
+                                                tick:
+                                                  tick -
+                                                  (eventStart -
+                                                    selectedEvent.durationTicks),
+                                                stringIndex,
+                                              }),
                                             },
                                       );
                                     }
@@ -603,9 +707,7 @@ export default function ArrangementPreview({
                                       x="0"
                                       y={-chordSpace}
                                       width={width}
-                                      height={
-                                        chordSpace + lyricsTop + lyricsHeight
-                                      }
+                                      height={chordSpace + lyricsTop}
                                       fill="transparent"
                                     />
                                   )}
@@ -648,7 +750,10 @@ export default function ArrangementPreview({
                                   {active && (
                                     <rect
                                       className="tab-playhead"
-                                      x={x(position!.tickInBar)}
+                                      x={
+                                        x(position!.tickInBar) +
+                                        (editing ? step / 2 : 0)
+                                      }
                                       y="40"
                                       width={3}
                                       height={staffBottom - 32}
@@ -758,6 +863,7 @@ export default function ArrangementPreview({
                                       <text
                                         key={tick}
                                         className="tab-beat"
+                                        data-beat-tick={tick}
                                         {...symbolHelp(
                                           "拍位",
                                           beatLabel(tick, arrangement.meter) +
@@ -929,7 +1035,15 @@ export default function ArrangementPreview({
                                           ].map((tick) => {
                                             const strings = notes
                                               .filter(
-                                                (n) => n.offsetTick === tick,
+                                                (n) =>
+                                                  n.offsetTick === tick &&
+                                                  !continuations.has(
+                                                    event.id +
+                                                      ":" +
+                                                      n.offsetTick +
+                                                      ":" +
+                                                      n.stringIndex,
+                                                  ),
                                               )
                                               .map((n) => n.stringIndex);
                                             if (strings.length < 2) return null;
@@ -998,11 +1112,35 @@ export default function ArrangementPreview({
                                             data-note-duration={
                                               note.durationTicks
                                             }
+                                            data-note-source-tick={
+                                              sourceSelection({
+                                                barId: bar.id,
+                                                eventId: event.id,
+                                                tick: note.offsetTick,
+                                                stringIndex: note.stringIndex,
+                                              }).tick
+                                            }
+                                            data-note-continuation={
+                                              continuations.has(
+                                                event.id +
+                                                  ":" +
+                                                  note.offsetTick +
+                                                  ":" +
+                                                  note.stringIndex,
+                                              ) || undefined
+                                            }
                                           >
                                             <rect
-                                              {...noteHelp(
+                                              {...engravedNoteHelp(
                                                 note,
                                                 event.chord?.name,
+                                                continuations.has(
+                                                  event.id +
+                                                    ":" +
+                                                    note.offsetTick +
+                                                    ":" +
+                                                    note.stringIndex,
+                                                ),
                                               )}
                                               x={
                                                 x(start + note.offsetTick) +
@@ -1148,19 +1286,23 @@ export default function ArrangementPreview({
                                                       n.stringIndex ===
                                                         stringIndex,
                                                   );
+                                                  const selection =
+                                                    sourceSelection({
+                                                      barId: bar.id,
+                                                      eventId: event.id,
+                                                      tick,
+                                                      stringIndex,
+                                                    });
                                                   const picked =
-                                                    selected &&
+                                                    editing.selected.barId ===
+                                                      selection.barId &&
+                                                    editing.selected.eventId ===
+                                                      selection.eventId &&
                                                     editing.selected.tick ===
-                                                      tick &&
+                                                      selection.tick &&
                                                     editing.selected
                                                       .stringIndex ===
                                                       stringIndex;
-                                                  const selection = {
-                                                    barId: bar.id,
-                                                    eventId: event.id,
-                                                    tick,
-                                                    stringIndex,
-                                                  };
                                                   return (
                                                     <g
                                                       key={
@@ -1183,11 +1325,21 @@ export default function ArrangementPreview({
                                                       }
                                                       data-symbol-focus-only="true"
                                                       {...(note
-                                                        ? noteHelp(
+                                                        ? engravedNoteHelp(
                                                             note,
                                                             event.chord?.name,
+                                                            continuations.has(
+                                                              event.id +
+                                                                ":" +
+                                                                tick +
+                                                                ":" +
+                                                                stringIndex,
+                                                            ),
                                                           )
                                                         : {})}
+                                                      data-note-source-tick={
+                                                        selection.tick
+                                                      }
                                                       data-note-cell={
                                                         bar.id +
                                                         ":" +
@@ -1242,17 +1394,26 @@ export default function ArrangementPreview({
                                                     >
                                                       <rect
                                                         className="score-cell-hit"
-                                                        x={x(start + tick)}
+                                                        x={
+                                                          cellBounds(
+                                                            start + tick,
+                                                          ).x
+                                                        }
                                                         y={
                                                           54 +
                                                           (5 - stringIndex) *
                                                             rowGap -
                                                           rowGap / 2
                                                         }
-                                                        width={step}
+                                                        width={
+                                                          cellBounds(
+                                                            start + tick,
+                                                          ).width
+                                                        }
                                                         height={rowGap}
                                                       />
                                                       <rect
+                                                        pointerEvents="none"
                                                         x={
                                                           x(start + tick) +
                                                           step / 2 -
@@ -1365,6 +1526,7 @@ export default function ArrangementPreview({
                                       step={step}
                                       width={width}
                                       top={vocalTop}
+                                      laneHeight={vocalHeight}
                                       showLabel={localIndex === 0}
                                       positionTick={
                                         active ? position?.tickInBar : undefined
@@ -1376,7 +1538,7 @@ export default function ArrangementPreview({
                                               active: editing.vocalActive,
                                               selected: editing.vocalSelected,
                                               tickAt,
-                                              gridStep: 1,
+                                              gridStep: editing.gridStep,
                                               onSelect: editing.onVocalSelect,
                                               onKey: editing.onVocalKey,
                                             }
@@ -1393,7 +1555,20 @@ export default function ArrangementPreview({
                                     width={width}
                                     top={lyricsTop}
                                     rowHeights={rowHeights}
+                                    rowInsets={rowInsets}
                                     lineCount={lines}
+                                    fontSize={lyricFontSize}
+                                    hitRanges={systemLyricHitRanges.map(
+                                      (range) => ({
+                                        ...range,
+                                        left:
+                                          range.left -
+                                          localIndex * measureWidth,
+                                        right:
+                                          range.right -
+                                          localIndex * measureWidth,
+                                      }),
+                                    )}
                                     extensions={lyricExtensions.get(bar.id)}
                                     barStartTick={(barNumber - 1) * limit}
                                     tickAt={tickAt}
@@ -1440,6 +1615,8 @@ export default function ArrangementPreview({
                                             onLayout: editing.onLyricLayout,
                                             onChange: editing.onLyricChange,
                                             onBegin: editing.onLyricBegin,
+                                            onEnd: editing.onLyricEnd,
+                                            onHistory: editing.onLyricHistory,
                                             selected: editing.lyricSelected,
                                             onSelect: editing.onLyricSelect,
                                             onMove: editing.onLyricMove,
@@ -1648,6 +1825,22 @@ export default function ArrangementPreview({
   );
 }
 
+function engravedNoteHelp(
+  note: Parameters<typeof noteHelp>[0],
+  chordName: string | undefined,
+  continuation: boolean,
+) {
+  return continuation
+    ? symbolHelp(
+        "延音续段",
+        "保持前一个同弦同品音，不再拨弦。" +
+          rhythmExplanation(note.durationTicks) +
+          "点击可调整原音符；谱面拆分不改变演奏时长。",
+        30,
+      )
+    : noteHelp(note, chordName);
+}
+
 function TabTie({
   from,
   to,
@@ -1742,11 +1935,12 @@ function layoutBar(
       i += 2;
     }
   }
-  const { points, step, x, tickAt } = scoreSpacing(
+  const { points, step, x, tickAt, cellBounds } = scoreSpacing(
     [...new Set(gridPoints)].sort((a, b) => a - b),
     spans,
     width,
     limit,
+    { proportional: !!editing },
   );
   const chordRows: number[] = [];
   const diagrams: {
@@ -1782,6 +1976,7 @@ function layoutBar(
     step,
     x,
     tickAt,
+    cellBounds,
     rhythm,
     diagrams,
     chordRows: chordRows.length,

@@ -99,90 +99,122 @@ export function barRhythm(
   // notes get separate lanes instead of silently adopting the first duration.
   const primary = items.filter((n) => n.lane === 0),
     rests: RhythmItem[] = [];
-  // Tuplets can start between beats. Infer their windows from the written voice,
-  // retaining a metrical window only when its existing notes fit that lattice.
-  const windows: { start: number; end: number; step: number; lane: number }[] = [];
+  // A 3:2 group may mix note values: an eighth rest and a quarter note can
+  // occupy the same group as three eighths. Keep the group's unit separate
+  // from each written duration, and retain explicitly shifted equal triplets.
+  type TupletWindow = {
+    start: number;
+    end: number;
+    step: number;
+    span: number;
+    lane: number;
+  };
+  const windows: TupletWindow[] = [];
+  const fits = (n: RhythmItem, window: TupletWindow) =>
+    !!n.shape?.triplet &&
+    n.tick >= window.start &&
+    n.tick + n.duration <= window.end &&
+    (n.tick - window.start) % Math.min(n.duration, window.step) === 0;
+  const overlaps = (n: RhythmItem, window: TupletWindow) =>
+    n.tick < window.end && n.tick + n.duration > window.start;
   for (const item of items) {
     if (!item.shape?.triplet) continue;
+    const voice = items.filter((n) => n.lane === item.lane);
+    if (windows.some((w) => w.lane === item.lane && fits(item, w))) continue;
     const step = item.duration,
       span = step * 3,
-      voice = items.filter((n) => n.lane === item.lane),
-      fits = (n: RhythmItem, start: number) =>
-        n.shape?.triplet &&
-        n.duration === step &&
-        (n.tick - start) % step === 0;
-    if (
-      windows.some(
-        (w) =>
-          w.lane === item.lane &&
-          w.step === step &&
-          item.tick >= w.start &&
-          item.tick < w.end &&
-          fits(item, w.start),
-      )
-    )
-      continue;
-    const metricalStart = Math.floor(item.tick / span) * span,
-      metricalEnd = Math.min(limit, metricalStart + span),
       threeNotes = [1, 2].every((offset) =>
         voice.some(
-          (n) => n.tick === item.tick + offset * step && fits(n, item.tick),
+          (n) =>
+            n.tick === item.tick + offset * step &&
+            n.shape?.triplet &&
+            n.duration === step,
         ),
       ),
-      metricalFits =
-        fits(item, metricalStart) &&
-        windows.every(
-          (w) =>
-            w.lane !== item.lane ||
-            w.end <= metricalStart ||
-            w.start >= metricalEnd,
-        ) &&
-        voice.every(
-          (n) =>
-            n.tick >= metricalEnd ||
-            n.tick + n.duration <= metricalStart ||
-            fits(n, metricalStart),
-        ),
-      start = threeNotes || !metricalFits ? item.tick : metricalStart;
-    let end = Math.min(limit, start + span);
+      shifted: TupletWindow = {
+        start: item.tick,
+        end: Math.min(limit, item.tick + span),
+        step,
+        span,
+        lane: item.lane,
+      };
+    let window: TupletWindow | undefined;
+    if (!threeNotes) {
+      // A quarter triplet at tick 8 fits the last two subdivisions of a
+      // quarter beat. Smaller metrical units are considered only for groups
+      // of at least one beat; a lone offbeat eighth keeps its shifted group.
+      for (let unit = step; unit >= 2; unit /= 2) {
+        if (unit !== step && unit * 3 < 24) break;
+        const start = Math.floor(item.tick / (unit * 3)) * unit * 3,
+          candidate: TupletWindow = {
+            start,
+            end: Math.min(limit, start + unit * 3),
+            step: unit,
+            span: unit * 3,
+            lane: item.lane,
+          };
+        if (
+          fits(item, candidate) &&
+          windows.every(
+            (w) =>
+              w.lane !== item.lane ||
+              w.end <= candidate.start ||
+              w.start >= candidate.end,
+          ) &&
+          voice.every((n) => !overlaps(n, candidate) || fits(n, candidate))
+        ) {
+          window = candidate;
+          break;
+        }
+      }
+    }
+    window ??= shifted;
     const conflict = voice.find(
-      (n) => n.tick >= start && n.tick < end && !fits(n, start),
+      (n) => n.tick >= window.start && n.tick < window.end && !fits(n, window),
     );
-    if (conflict) end = conflict.tick;
-    windows.push({ start, end, step, lane: item.lane });
+    if (conflict) window.end = conflict.tick;
+    if (window.end > window.start) windows.push(window);
   }
   const pulse = meter === "6/8" ? 36 : 24;
-  function silence(start: number, end: number) {
+  const tripletValues = bases.map((base) => (base * 2) / 3);
+  function silence(start: number, end: number, lane = 0) {
     while (start < end) {
       const window = windows.find(
-        (w) => w.lane === 0 && start >= w.start && start < w.end,
+        (w) => w.lane === lane && start >= w.start && start < w.end,
       );
       const nextWindow = windows
-        .filter((w) => w.lane === 0 && w.start > start)
+        .filter((w) => w.lane === lane && w.start > start)
         .reduce((n, w) => Math.min(n, w.start), end);
       const boundary = Math.min(
         end,
         window?.end ?? Math.ceil((start + 1) / pulse) * pulse,
         nextWindow,
       );
-      const inTuplet =
-        !!window &&
-        (start - window.start) % window.step === 0 &&
-        start + window.step <= boundary;
       const values =
         meter === "6/8" ? [36, 24, 18, 12, 6, 3, 1] : [24, 12, 6, 3, 1];
       const remainder = boundary - start,
-        exact = window && rhythmShape(remainder);
-      const duration = inTuplet
-        ? window!.step
-        : exact
-          ? remainder
-          : values.find((v) => v <= remainder && (start % pulse) % v === 0)!;
+        tupletRest =
+          window &&
+          tripletValues.find(
+            (v) =>
+              v <= remainder &&
+              (start - window.start) % Math.min(v, window.step) === 0,
+          ),
+        ordinaryRest = values.find(
+          (v) => v <= remainder && (start % pulse) % v === 0,
+        )!,
+        duration =
+          tupletRest ||
+          // Off-grid gaps can end on a fractional beat. Prefer one known
+          // value to a row of one-tick placeholders without moving any onset.
+          (ordinaryRest === 1 && rhythmShape(remainder)
+            ? remainder
+            : ordinaryRest);
       rests.push({
         tick: start,
         duration,
         rest: true,
-        lane: 0,
+        lane,
         strings: [],
         shape: rhythmShape(duration),
       });
@@ -195,6 +227,18 @@ export function barRhythm(
     cursor = item.tick + item.duration;
   }
   if (cursor < limit) silence(cursor, limit);
+  // Secondary voices need rests within a tuplet to explain its ratio, but
+  // should not gain unrelated rest symbols throughout the whole measure.
+  for (const window of windows.filter((w) => w.lane !== 0)) {
+    let end = window.start;
+    for (const item of items.filter(
+      (n) => n.lane === window.lane && overlaps(n, window),
+    )) {
+      if (item.tick > end) silence(end, item.tick, window.lane);
+      end = Math.max(end, item.tick + item.duration);
+    }
+    if (end < window.end) silence(end, window.end, window.lane);
+  }
   items.push(...rests);
   items.sort((a, b) => a.lane - b.lane || a.tick - b.tick);
   const tuplets: { items: RhythmItem[]; complete: boolean }[] = [];
@@ -209,15 +253,25 @@ export function barRhythm(
     );
     if (!group.length) continue;
     const complete =
-      window.end - window.start === window.step * 3 &&
-      group.length === 3 &&
+      window.end - window.start === window.span &&
+      group[0].tick === window.start &&
+      group.at(-1)!.tick + group.at(-1)!.duration === window.end &&
       group.every(
         (item, index) =>
-          item.tick === window.start + index * window.step &&
-          item.duration === window.step,
+          fits(item, window) &&
+          (!index ||
+            group[index - 1].tick + group[index - 1].duration === item.tick),
       );
     group.forEach((item) => tupletGroups.set(item, tuplets.length));
     tuplets.push({ items: group, complete });
+  }
+  // A compact fractional rest outside an authored group still needs its
+  // explicit 3:2 ratio. It does not imply three new notes or a complete group.
+  for (const rest of rests) {
+    if (rest.shape?.triplet && !tupletGroups.has(rest)) {
+      tupletGroups.set(rest, tuplets.length);
+      tuplets.push({ items: [rest], complete: false });
+    }
   }
   const beamGroups: RhythmItem[][] = [];
   const unit = meter === "6/8" ? 36 : 24;

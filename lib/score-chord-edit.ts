@@ -109,13 +109,14 @@ function checkExplicitNotes(event: ArrangementEvent) {
 function withChord(
   event: ArrangementEvent,
   chord: Chord,
-  automatic: boolean,
+  stroke: ArrangementEvent["stroke"],
 ): ArrangementEvent {
-  if (automatic) {
-    const generated = { ...event, chord: structuredClone(chord) };
-    delete generated.notes;
-    return generated;
-  }
+  const changed = { ...event, chord: structuredClone(chord) };
+  if (stroke) changed.stroke = stroke;
+  else delete changed.stroke;
+  // Adding harmony to silence does not add an attack. Existing implicit
+  // accompaniment is preserved only when replacing its chord at the start.
+  if (event.notes === undefined && !event.chord) changed.notes = [];
   const unavailable = event.notes?.find(
     (note) => note.marker === "cross" && chord.frets[note.stringIndex] < 0,
   );
@@ -123,7 +124,7 @@ function withChord(
     throw Error(
       `这个和弦的第 ${6 - unavailable.stringIndex} 弦不弹，但这里写有 ×。请选择其他指型，或先把该音改为数字品位。`,
     );
-  return { ...event, chord: structuredClone(chord) };
+  return changed;
 }
 
 /**
@@ -152,10 +153,9 @@ export function setScoreChord(
     throw Error("和弦起点必须位于当前段内的有效拍位。");
   if (at === 0 && sameChord(event.chord, chord)) return { arrangement, cursor };
 
-  // Empty imported/cleared silence can become accompaniment. A chord-bearing
-  // explicit rest remains intentional silence; other manual notes stay manual.
-  const automatic =
-    event.notes === undefined || (!event.chord && event.notes.length === 0);
+  // Pluck is the default for notes written later, not an instruction to add
+  // notes. Replacing existing harmony keeps its chosen stroke or legacy default.
+  const stroke = at === 0 && event.chord ? event.stroke : "pluck";
   let changedBar: ArrangementBar;
   let nextCursor = cursor;
   if (at === 0) {
@@ -163,7 +163,7 @@ export function setScoreChord(
       ...bar,
       events: bar.events.map((candidate) =>
         candidate.id === event.id
-          ? withChord(candidate, chord, automatic)
+          ? withChord(candidate, chord, stroke)
           : candidate,
       ),
     };
@@ -187,7 +187,7 @@ export function setScoreChord(
       ...divided,
       events: divided.events.map((candidate) =>
         candidate.id === right.id
-          ? withChord(candidate, chord, automatic)
+          ? withChord(candidate, chord, stroke)
           : candidate,
       ),
     };

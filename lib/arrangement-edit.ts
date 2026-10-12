@@ -70,6 +70,10 @@ export function splitEvent(
               a.offsetTick === n.offsetTick && a.stringIndex === n.stringIndex,
           )!.durationTicks,
       }));
+      // A split preserves the original stroke, including the legacy default.
+      const right = makeEvent(e.chord, e.durationTicks - left);
+      if (e.stroke) right.stroke = e.stroke;
+      else delete right.stroke;
       return [
         {
           ...e,
@@ -77,8 +81,7 @@ export function splitEvent(
           ...(notes ? { notes: notes.filter((n) => n.offsetTick < left) } : {}),
         },
         {
-          ...makeEvent(e.chord, e.durationTicks - left),
-          ...(e.stroke ? { stroke: e.stroke } : {}),
+          ...right,
           ...(notes
             ? {
                 notes: notes

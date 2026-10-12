@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Choice } from "./room-controls";
 import ArrangementPreview from "./arrangement-preview";
+import LyricFontSizeControl from "./lyric-font-size-control";
 import { useArrangementPlayer } from "./arrangement-player";
 import {
   arrangementSchema,
@@ -43,6 +44,14 @@ export default function ArrangementReader({
   const [zoom, setZoom] = useState("100"),
     [loop, setLoop] = useState(false),
     [scrolling, setScrolling] = useState(false);
+  const [lyricFontOverride, setLyricFontOverride] = useState<{
+    scoreId: string;
+    size?: number;
+  }>({ scoreId: score.id });
+  if (lyricFontOverride.scoreId !== score.id)
+    setLyricFontOverride({ scoreId: score.id });
+  const readingLyricFontSize =
+    lyricFontOverride.scoreId === score.id ? lyricFontOverride.size : undefined;
   const area = useRef<HTMLDivElement>(null);
   const player = useArrangementPlayer(
     value,
@@ -116,6 +125,13 @@ export default function ArrangementReader({
               label: v === "100" ? "适合宽度" : v + "%",
             }))}
           />
+          <LyricFontSizeControl
+            value={readingLyricFontSize ?? value.lyricFontSize}
+            onChange={(size) =>
+              setLyricFontOverride({ scoreId: score.id, size })
+            }
+            title="仅调整本次阅读的歌词显示；要保存默认字号，请在编排编辑中调整并保存。"
+          />
           <button className="button secondary-button" onClick={onEdit}>
             <NotebookPen size={15} />
             {count ? "继续编辑" : "开始编排"}
@@ -138,6 +154,7 @@ export default function ArrangementReader({
               title={score.title}
               capo={score.capo}
               position={player.position}
+              lyricFontSize={readingLyricFontSize}
             />
           </div>
         ) : (

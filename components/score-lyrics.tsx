@@ -6,12 +6,18 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type CSSProperties,
 } from "react";
 import {
   beatLabel,
   type Arrangement,
   type ArrangementBar,
 } from "@/lib/arrangement";
+import {
+  DEFAULT_LYRIC_FONT_SIZE,
+  MAX_LYRIC_HORIZONTAL_OFFSET,
+  resolveLyricFontSize,
+} from "@/lib/lyric-style";
 
 type LyricsLayout = {
   bar: ArrangementBar;
@@ -20,6 +26,7 @@ type LyricsLayout = {
   step: number;
   width: number;
   lineCount?: number;
+  fontSize?: number;
 };
 export type LyricExtension = {
   verse: number;
@@ -29,16 +36,25 @@ export type LyricExtension = {
   offsetX?: number;
   offsetY?: number;
 };
+export type LyricHitRange = {
+  key: string;
+  verse: number;
+  left: number;
+  right: number;
+};
 export type ScoreLyricsProps = LyricsLayout & {
   barNumber: number;
   top: number;
   meter?: Arrangement["meter"];
   rowHeights?: readonly number[];
+  rowInsets?: readonly number[];
   tickAt?: (x: number) => number;
   snapStep?: number;
   absoluteTickAt?: (clientX: number) => number;
   barStartTick?: number;
   extensions?: LyricExtension[];
+  /** Nonempty lyric fields across the entire system, in this bar's coordinates. */
+  hitRanges?: readonly LyricHitRange[];
   editing?: {
     locked: boolean;
     active?: boolean;
@@ -52,6 +68,7 @@ export type ScoreLyricsProps = LyricsLayout & {
     ) => void;
     onBegin?: (barId: string, tick: number, verse: number) => void;
     onEnd?: () => void;
+    onHistory?: (command: "undo" | "redo") => void;
     onSelect?: (barId: string, tick: number, verse: number) => void;
     onMove?: (
       barId: string,
@@ -69,35 +86,38 @@ export type ScoreLyricsProps = LyricsLayout & {
   };
 };
 
-const LINE_HEIGHT = 18;
-const FONT_SIZE = 14;
+const INPUT_INSET = 4;
+const MIN_INPUT_WIDTH = 24;
 const clamp = (value: number, lower: number, upper: number) =>
   Math.max(lower, Math.min(upper, value));
 
-function textWidth(text: string) {
+function lyricMetrics(fontSize?: number) {
+  const size = resolveLyricFontSize(fontSize);
+  const lineHeight = Math.round((size * 4) / 3);
+  return {
+    FONT_SIZE: size,
+    LINE_HEIGHT: lineHeight,
+    BASELINE: Math.round((size * 7) / 6),
+    MIN_ROW_HEIGHT: lineHeight + 12,
+  };
+}
+function textWidth(text: string, fontSize = DEFAULT_LYRIC_FONT_SIZE) {
   return Array.from(text).reduce(
     (total, char) =>
-      total + (/^[\u0020-\u007e]$/.test(char) ? FONT_SIZE * 0.55 : FONT_SIZE),
+      total +
+      (char === " "
+        ? fontSize * 0.25
+        : /^[\u0021-\u007e]$/.test(char)
+          ? fontSize * 0.55
+          : fontSize),
     0,
   );
 }
-function wrapLyric(text: string, width: number) {
-  const lines: string[] = [];
-  let line = "";
-  for (const char of Array.from(text)) {
-    if (line && textWidth(line + char) > width) {
-      lines.push(line);
-      line = "";
-    }
-    line += char;
-  }
-  lines.push(line);
-  return lines;
-}
 function lyricLayout(
-  { bar, points, x, step, width, lineCount = 2 }: LyricsLayout,
+  { bar, points, x, step, width, lineCount = 2, fontSize }: LyricsLayout,
   extraTicks: number[] = [],
 ) {
+  const { FONT_SIZE, MIN_ROW_HEIGHT } = lyricMetrics(fontSize);
   const endTick = bar.events.reduce(
     (total, event) => total + event.durationTicks,
     0,
@@ -123,25 +143,16 @@ function lyricLayout(
         (lyric) => lyric.tick === tick && lyric.verse === verse,
       );
       const text = lyric?.text ?? "";
-      const offsetX = lyric?.offsetX ?? 0,
-        offsetY = lyric?.offsetY ?? 0;
+      const offsetX = lyric?.offsetX ?? 0;
+      // Keep legacy vertical offsets in the data, but every verse now shares
+      // one baseline. Horizontal editing must not rewrite that saved field.
+      const storedOffsetY = lyric?.offsetY ?? 0;
+      const offsetY = 0;
       const center = centerAt(tick) + offsetX;
       const left = center - FONT_SIZE / 2;
-      const nextLyric = lyrics
-        .filter(
-          (lyric) =>
-            lyric.verse === verse && lyric.tick > tick && lyric.text.length > 0,
-        )
-        .sort((a, b) => a.tick - b.tick)[0];
-      const availableWidth = Math.max(
-        24,
-        (nextLyric
-          ? centerAt(nextLyric.tick) + (nextLyric.offsetX ?? 0)
-          : width - 8) -
-          left -
-          4,
-      );
-      const lines = wrapLyric(text, availableWidth);
+      // A lyric is one verse entry, even when its ink crosses a barline.
+      // Visual wrapping must never create another verse or musical onset.
+      const lines = [text];
       const vocal =
         lyric?.anchorMode === "free"
           ? undefined
@@ -158,21 +169,28 @@ function lyricLayout(
         center,
         offsetX,
         offsetY,
-        availableWidth,
+        storedOffsetY,
         lines,
         anchorMode: lyric?.anchorMode ?? "auto",
         vocalNoteId: vocal?.id,
-        height: Math.max(32, lines.length * LINE_HEIGHT + 14),
-        editWidth: Math.max(24, Math.min(availableWidth, textWidth(text) + 10)),
+        height: MIN_ROW_HEIGHT,
+        editWidth: Math.max(
+          MIN_INPUT_WIDTH,
+          textWidth(text, FONT_SIZE) + INPUT_INSET * 2,
+        ),
       };
     });
+    const inset = Math.max(0, ...cells.map((cell) => -cell.offsetY));
     return {
       verse,
       cells,
-      height: Math.max(
-        32,
-        ...cells.map((cell) => cell.height + Math.max(0, cell.offsetY)),
-      ),
+      inset,
+      height:
+        inset +
+        Math.max(
+          MIN_ROW_HEIGHT,
+          ...cells.map((cell) => cell.height + Math.max(0, cell.offsetY)),
+        ),
     };
   });
   return {
@@ -183,6 +201,9 @@ function lyricLayout(
 export function scoreLyricsRowHeights(props: LyricsLayout): number[] {
   return lyricLayout(props).verses.map((verse) => verse.height);
 }
+export function scoreLyricsRowInsets(props: LyricsLayout): number[] {
+  return lyricLayout(props).verses.map((verse) => verse.inset);
+}
 export function scoreLyricsHeight(props: LyricsLayout) {
   return lyricLayout(props).height;
 }
@@ -192,28 +213,72 @@ export function scoreLyricsHorizontalBounds(
   props: LyricsLayout,
   includeEditor = false,
 ): { left: number; right: number } {
+  const { FONT_SIZE } = lyricMetrics(props.fontSize);
   let left = 8,
     right = props.width - 8;
   for (const { cells } of lyricLayout(props).verses)
     for (const cell of cells) {
       if (!cell.text) continue;
       const centered =
-        cell.lines.length === 1 && textWidth(cell.text) <= FONT_SIZE + 1;
+        cell.lines.length === 1 &&
+        textWidth(cell.text, FONT_SIZE) <= FONT_SIZE + 1;
       for (const line of cell.lines) {
-        const width = textWidth(line);
+        const width = textWidth(line, FONT_SIZE);
         const start = centered ? cell.center - width / 2 : cell.left;
         left = Math.min(left, start);
         right = Math.max(right, start + width);
       }
       if (includeEditor) {
-        left = Math.min(left, cell.center - 12);
-        right = Math.max(
-          right,
-          cell.center - 12 + Math.max(36, cell.editWidth),
-        );
+        left = Math.min(left, cell.left - INPUT_INSET);
+        right = Math.max(right, cell.left - INPUT_INSET + cell.editWidth);
       }
     }
   return { left, right };
+}
+/** Empty input targets must yield to text displaced from any neighboring bar. */
+export function scoreLyricsHitRanges(props: LyricsLayout): LyricHitRange[] {
+  const { FONT_SIZE } = lyricMetrics(props.fontSize);
+  return lyricLayout(props).verses.flatMap(({ verse, cells }) =>
+    cells
+      .filter((cell) => cell.text)
+      .map((cell) => {
+        // Reserve a conservative font-width envelope, including the editor and
+        // drag handle. Narrow Latin glyphs may leave a little extra click space.
+        const extent = Array.from(cell.text).reduce(
+          (sum, char) =>
+            sum +
+            (char === "\t"
+              ? FONT_SIZE * 4
+              : char === " "
+                ? FONT_SIZE / 2
+                : FONT_SIZE * 1.1),
+          0,
+        );
+        const left = cell.left - INPUT_INSET - 2;
+        return {
+          key: props.bar.id + ":" + cell.tick + ":" + verse,
+          verse,
+          left,
+          right: left + Math.max(MIN_INPUT_WIDTH, extent + INPUT_INSET * 2 + 5),
+        };
+      }),
+  );
+}
+function unoccupiedIntervals(
+  left: number,
+  right: number,
+  ranges: readonly LyricHitRange[],
+) {
+  const gaps: { left: number; right: number }[] = [];
+  let cursor = left;
+  for (const range of [...ranges].sort((a, b) => a.left - b.left)) {
+    if (range.right <= cursor || range.left >= right) continue;
+    if (range.left > cursor) gaps.push({ left: cursor, right: range.left });
+    cursor = Math.max(cursor, range.right);
+    if (cursor >= right) break;
+  }
+  if (cursor < right) gaps.push({ left: cursor, right });
+  return gaps;
 }
 type LyricCell = ReturnType<
   typeof lyricLayout
@@ -243,22 +308,29 @@ export default function ScoreLyrics({
   step,
   width,
   lineCount = 2,
+  fontSize,
   top,
   meter = "4/4",
   rowHeights,
+  rowInsets,
   tickAt,
   snapStep = 1,
   absoluteTickAt,
   barStartTick,
   extensions = [],
+  hitRanges,
   editing,
 }: ScoreLyricsProps) {
+  const { FONT_SIZE, LINE_HEIGHT, BASELINE } = lyricMetrics(fontSize);
   const root = useRef<SVGGElement>(null);
   const pendingFocus = useRef<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<Record<number, number>>({});
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [measuredWidths, setMeasuredWidths] = useState<Record<string, number>>(
+    {},
+  );
   const keyFor = (tick: number, verse: number) =>
     bar.id + ":" + tick + ":" + verse;
   const selected =
@@ -269,12 +341,55 @@ export default function ScoreLyrics({
       : focused
         ? Number(focused.split(":").at(-1))
         : (editing?.selected?.verse ?? 0);
-  const { verses } = lyricLayout({ bar, points, x, step, width, lineCount }, [
-    ...Object.values(temporary),
-    ...(selected ? [selected.tick] : []),
-  ]);
-  const heights = verses.map(({ height }, index) =>
-    Math.max(height, rowHeights?.[index] ?? 0),
+  const { verses } = lyricLayout(
+    { bar, points, x, step, width, lineCount, fontSize },
+    [...Object.values(temporary), ...(selected ? [selected.tick] : [])],
+  );
+  const occupiedRanges =
+    hitRanges ??
+    scoreLyricsHitRanges({ bar, points, x, step, width, lineCount, fontSize });
+  const editWidth = (cell: LyricCell, verse: number) =>
+    Math.max(
+      MIN_INPUT_WIDTH,
+      Math.ceil(
+        (measuredWidths[keyFor(cell.tick, verse)] ??
+          textWidth(cell.text, FONT_SIZE)) +
+          INPUT_INSET * 2 +
+          1,
+      ),
+    );
+  useEffect(() => {
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled || !root.current) return;
+      const input =
+        root.current.querySelector<HTMLTextAreaElement>(".score-lyric-input");
+      const reference =
+        input ?? root.current.querySelector(".score-lyric-text");
+      if (!reference) return;
+      const style = getComputedStyle(reference);
+      const context = document.createElement("canvas").getContext("2d");
+      if (!context) return;
+      context.font = `${style.fontStyle} ${style.fontWeight} ${FONT_SIZE}px ${style.fontFamily}`;
+      const next: Record<string, number> = {};
+      for (const lyric of bar.lyrics ?? [])
+        next[bar.id + ":" + lyric.tick + ":" + lyric.verse] =
+          context.measureText(lyric.text).width;
+      setMeasuredWidths((previous) =>
+        JSON.stringify(previous) === JSON.stringify(next) ? previous : next,
+      );
+    };
+    measure();
+    void document.fonts.ready.then(measure);
+    return () => {
+      cancelled = true;
+    };
+  }, [bar.id, bar.lyrics, FONT_SIZE]);
+  const insets = verses.map(({ inset }, index) =>
+    Math.max(inset, rowInsets?.[index] ?? 0),
+  );
+  const heights = verses.map(({ height, inset }, index) =>
+    Math.max(height - inset + insets[index], rowHeights?.[index] ?? 0),
   );
   const endTick = bar.events.reduce(
     (total, event) => total + event.durationTicks,
@@ -337,6 +452,7 @@ export default function ScoreLyrics({
   ) => {
     event.stopPropagation();
     if (event.nativeEvent.isComposing) return;
+    if (historyKey(event)) return;
     const scoreRoot = event.currentTarget.closest(".tab-preview");
     if (!scoreRoot) return;
     if (event.key === "Tab") {
@@ -357,12 +473,26 @@ export default function ScoreLyrics({
       focusAt((verse + 1) % verses.length, tick);
     } else if (event.key === "Escape") event.currentTarget.blur();
   };
+  const historyKey = (event: KeyboardEvent<HTMLElement | SVGGElement>) => {
+    if (
+      !editing?.onHistory ||
+      event.nativeEvent.isComposing ||
+      !(event.ctrlKey || event.metaKey) ||
+      event.altKey
+    )
+      return false;
+    const key = event.key.toLowerCase();
+    if (key !== "z" && key !== "y") return false;
+    event.preventDefault();
+    editing.onHistory(key === "y" || event.shiftKey ? "redo" : "undo");
+    return true;
+  };
   const startDrag = (
     event: PointerEvent<SVGGElement>,
     cell: LyricCell,
     verse: number,
   ) => {
-    const mode = editing?.mode ?? "time";
+    const mode = editing?.mode ?? "layout";
     if (
       !editing ||
       editing.locked ||
@@ -399,9 +529,9 @@ export default function ScoreLyrics({
       startAbsolute,
       nextAbsolute: startAbsolute,
       startOffsetX: cell.offsetX,
-      startOffsetY: cell.offsetY,
+      startOffsetY: cell.storedOffsetY,
       nextOffsetX: cell.offsetX,
-      nextOffsetY: cell.offsetY,
+      nextOffsetY: cell.storedOffsetY,
       offsetX: 0,
       offsetY: 0,
     };
@@ -424,14 +554,15 @@ export default function ScoreLyrics({
     event.stopPropagation();
     const startPoint = localPoint(previous.clientX, previous.clientY),
       point = localPoint(event.clientX, event.clientY);
-    const dx = startPoint && point ? point.x - startPoint.x : 0,
-      dy = startPoint && point ? point.y - startPoint.y : 0;
+    const dx = startPoint && point ? point.x - startPoint.x : 0;
     const next = { ...previous };
     if (previous.mode === "layout") {
-      next.nextOffsetX = clamp(Math.round(previous.startOffsetX + dx), -96, 96);
-      next.nextOffsetY = clamp(Math.round(previous.startOffsetY + dy), -24, 24);
+      next.nextOffsetX = clamp(
+        Math.round(previous.startOffsetX + dx),
+        -MAX_LYRIC_HORIZONTAL_OFFSET,
+        MAX_LYRIC_HORIZONTAL_OFFSET,
+      );
       next.offsetX = next.nextOffsetX - previous.startOffsetX;
-      next.offsetY = next.nextOffsetY - previous.startOffsetY;
     } else {
       next.offsetX = dx;
       if (absoluteTickAt)
@@ -508,16 +639,13 @@ export default function ScoreLyrics({
     verse: number,
   ) => {
     event.stopPropagation();
-    const mode = editing?.mode ?? "time";
+    if (event.nativeEvent.isComposing || historyKey(event)) return;
+    const mode = editing?.mode ?? "layout";
     const horizontal = event.key === "ArrowLeft" || event.key === "ArrowRight";
     const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
-    if (
-      !editing ||
-      editing.locked ||
-      (!horizontal && !(mode === "layout" && vertical))
-    )
-      return;
+    if (!editing || editing.locked || (!horizontal && !vertical)) return;
     event.preventDefault();
+    if (!horizontal) return;
     const previousKey = keyFor(cell.tick, verse),
       scoreRoot = event.currentTarget.closest(".tab-preview");
     let targetKey = previousKey;
@@ -527,16 +655,11 @@ export default function ScoreLyrics({
         verse,
         cell.tick,
         clamp(
-          cell.offsetX +
-            (horizontal ? (event.key === "ArrowRight" ? 1 : -1) : 0),
-          -96,
-          96,
+          cell.offsetX + (event.key === "ArrowRight" ? 1 : -1),
+          -MAX_LYRIC_HORIZONTAL_OFFSET,
+          MAX_LYRIC_HORIZONTAL_OFFSET,
         ),
-        clamp(
-          cell.offsetY + (vertical ? (event.key === "ArrowDown" ? 1 : -1) : 0),
-          -24,
-          24,
-        ),
+        cell.storedOffsetY,
       );
     else if (absoluteTickAt && editing.onMove) {
       const bounds = event.currentTarget.getBoundingClientRect();
@@ -567,24 +690,37 @@ export default function ScoreLyrics({
     });
   };
   const canMove =
-    editing?.mode === "layout"
-      ? !!editing.onLayout
+    (editing?.mode ?? "layout") === "layout"
+      ? !!editing?.onLayout
       : !!editing?.onMove && !!absoluteTickAt;
+  const layoutMode = (editing?.mode ?? "layout") === "layout";
 
   return (
     <g
       ref={root}
       className="tab-lyrics-space score-lyrics"
       data-lyrics-space="true"
+      data-lyric-font-size={FONT_SIZE}
+      style={
+        {
+          "--lyric-font-size": FONT_SIZE + "px",
+          "--lyric-line-height": LINE_HEIGHT + "px",
+        } as CSSProperties
+      }
       aria-label="歌词"
       transform={"translate(0 " + top + ")"}
     >
       {verses.map(({ verse, cells }) => {
         const height = heights[verse],
-          y =
+          rowTop =
             5 +
-            heights.slice(0, verse).reduce((total, value) => total + value, 0);
+            heights.slice(0, verse).reduce((total, value) => total + value, 0),
+          y = rowTop + insets[verse];
         const showEmpty = !!editing && activeVerse === verse;
+        const rowRanges = occupiedRanges.filter(
+          (range) => range.verse === verse,
+        );
+        const timelineGaps = unoccupiedIntervals(26, width - 8, rowRanges);
         const activeCell =
           editing && !editing.locked
             ? cells.find((cell) => focused === keyFor(cell.tick, verse))
@@ -595,56 +731,67 @@ export default function ScoreLyrics({
             className="score-lyric-verse"
             data-lyric-row={verse + 1}
             data-lyric-row-active={showEmpty || undefined}
+            data-lyric-row-height={height}
+            data-lyric-row-inset={insets[verse]}
           >
             {showEmpty && (
               <>
-                <rect
-                  className="score-lyric-timeline"
-                  data-lyric-timeline={bar.id + ":" + verse}
-                  x={26}
-                  y={y}
-                  width={Math.max(0, width - 34)}
-                  height={height}
-                  fill="transparent"
-                  role="button"
-                  tabIndex={editing.locked ? -1 : 0}
-                  aria-label={
-                    "第 " +
-                    barNumber +
-                    " 小节，第 " +
-                    (verse + 1) +
-                    " 行歌词时间轴，点击选择起唱位置"
-                  }
-                  aria-disabled={editing.locked}
-                  onPointerDown={(event) => {
-                    if (editing.locked) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const point = localPoint(event.clientX, event.clientY);
-                    if (point) focusAt(verse, localTick(point.x));
-                  }}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      focusAt(
-                        verse,
-                        selected?.verse === verse ? selected.tick : 0,
-                      );
+                {timelineGaps.map((gap, index) => (
+                  <rect
+                    key={gap.left}
+                    className="score-lyric-timeline"
+                    data-lyric-timeline={bar.id + ":" + verse}
+                    x={gap.left}
+                    y={rowTop}
+                    width={gap.right - gap.left}
+                    height={height}
+                    fill="transparent"
+                    role="button"
+                    tabIndex={editing.locked || index !== 0 ? -1 : 0}
+                    aria-label={
+                      "第 " +
+                      barNumber +
+                      " 小节，第 " +
+                      (verse + 1) +
+                      " 行歌词时间轴，点击选择起唱位置"
                     }
-                  }}
-                />
+                    aria-disabled={editing.locked}
+                    onPointerDown={(event) => {
+                      if (editing.locked) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const point = localPoint(event.clientX, event.clientY);
+                      if (point) focusAt(verse, localTick(point.x));
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        focusAt(
+                          verse,
+                          selected?.verse === verse ? selected.tick : 0,
+                        );
+                      }
+                    }}
+                  />
+                ))}
                 <line
                   className="score-lyric-guide"
                   x1={26}
                   x2={width - 8}
-                  y1={y + height - 3}
-                  y2={y + height - 3}
+                  y1={rowTop + height - 3}
+                  y2={rowTop + height - 3}
+                  pointerEvents="none"
                 />
               </>
             )}
             {editing && (
-              <text className="score-lyric-verse-label" x={12} y={y + 18}>
+              <text
+                className="score-lyric-verse-label"
+                pointerEvents="none"
+                x={12}
+                y={y + BASELINE}
+              >
                 {verse + 1}
               </text>
             )}
@@ -661,15 +808,14 @@ export default function ScoreLyrics({
                   selected.verse === verse;
                 const obscured =
                   !cell.text &&
-                  cells.some(
-                    (other) =>
-                      other.text &&
-                      other.tick < cell.tick &&
-                      other.left + textWidth(other.lines[0]) > cell.center - 10,
+                  rowRanges.some(
+                    (range) =>
+                      range.left < cell.center + 10 &&
+                      range.right > cell.center - 10,
                   );
                 const centered =
                   cell.lines.length === 1 &&
-                  textWidth(cell.text) <= FONT_SIZE + 1;
+                  textWidth(cell.text, FONT_SIZE) <= FONT_SIZE + 1;
                 const moving = drag?.tick === cell.tick && drag.verse === verse;
                 const dx = moving ? drag.offsetX : 0,
                   dy = moving ? drag.offsetY : 0;
@@ -689,13 +835,13 @@ export default function ScoreLyrics({
                       dx || dy ? "translate(" + dx + " " + dy + ")" : undefined
                     }
                   >
-                    {editing && picked && !active && (
+                    {editing && picked && !active && !obscured && (
                       <rect
                         className="score-lyric-selection"
-                        x={cell.center - 12}
+                        x={cell.left - INPUT_INSET}
                         y={y + cell.offsetY}
-                        width={Math.max(24, cell.editWidth)}
-                        height={cell.height - 5}
+                        width={editWidth(cell, verse)}
+                        height={cell.height}
                         rx={3}
                         fill="#b8804812"
                         stroke="#b8804870"
@@ -703,13 +849,14 @@ export default function ScoreLyrics({
                     )}
                     {!active && (cell.text || (showEmpty && !obscured)) && (
                       <text
+                        pointerEvents={cell.text ? undefined : "none"}
                         className={
                           cell.text
                             ? "score-lyric-text"
                             : "score-lyric-placeholder"
                         }
                         x={centered || !cell.text ? cell.center : cell.left}
-                        y={y + 18 + cell.offsetY}
+                        y={y + BASELINE + cell.offsetY}
                         textAnchor={centered || !cell.text ? "middle" : "start"}
                         xmlSpace="preserve"
                       >
@@ -744,11 +891,9 @@ export default function ScoreLyrics({
                 const offsetX =
                     (extension.offsetX ?? cell?.offsetX ?? 0) +
                     (movingDrag?.offsetX ?? 0),
-                  offsetY =
-                    (extension.offsetY ?? cell?.offsetY ?? 0) +
-                    (movingDrag?.offsetY ?? 0);
+                  offsetY = 0;
                 const text = extension.text ?? cell?.lines[0] ?? "";
-                const extent = textWidth(text);
+                const extent = textWidth(text, FONT_SIZE);
                 const from =
                   extension.startTick === undefined
                     ? 26
@@ -772,8 +917,8 @@ export default function ScoreLyrics({
                     data-lyric-extension-end={extension.endTick}
                     x1={from}
                     x2={to}
-                    y1={y + 22 + offsetY}
-                    y2={y + 22 + offsetY}
+                    y1={y + BASELINE + 5 + offsetY}
+                    y2={y + BASELINE + 5 + offsetY}
                     stroke="#393128"
                     strokeWidth={1.1}
                     pointerEvents="none"
@@ -786,31 +931,40 @@ export default function ScoreLyrics({
                 .map((cell) => {
                   const active =
                     !editing.locked && focused === keyFor(cell.tick, verse);
-                  const inputWidth = active
-                    ? Math.max(36, cell.editWidth)
-                    : cell.text
-                      ? cell.editWidth
-                      : 24;
-                  const inputLeft = cell.center - 12;
+                  const inputWidth =
+                    active || cell.text ? editWidth(cell, verse) : 24;
+                  const inputLeft =
+                    active || cell.text
+                      ? cell.left - INPUT_INSET
+                      : cell.center - 12;
+                  const hiddenByLyric =
+                    !cell.text &&
+                    rowRanges.some(
+                      (range) =>
+                        inputLeft < range.right &&
+                        inputLeft + inputWidth > range.left,
+                    );
                   return (
                     <foreignObject
                       key={cell.tick}
                       x={inputLeft}
                       y={y + cell.offsetY}
                       width={inputWidth}
-                      height={cell.height - 5}
+                      height={cell.height}
                       className={
                         "score-lyric-field" + (active ? " is-focused" : "")
                       }
                       style={{
                         pointerEvents:
-                          !active &&
-                          activeCell &&
-                          inputLeft <
-                            activeCell.center -
-                              12 +
-                              Math.max(36, activeCell.editWidth) &&
-                          inputLeft + inputWidth > activeCell.center - 12
+                          hiddenByLyric ||
+                          (!active &&
+                            activeCell &&
+                            inputLeft <
+                              activeCell.left -
+                                INPUT_INSET +
+                                editWidth(activeCell, verse) &&
+                            inputLeft + inputWidth >
+                              activeCell.left - INPUT_INSET)
                             ? "none"
                             : "auto",
                       }}
@@ -835,8 +989,9 @@ export default function ScoreLyrics({
                         maxLength={120}
                         disabled={editing.locked}
                         rows={1}
+                        wrap="off"
                         spellCheck={false}
-                        style={{ opacity: active ? 1 : 0 }}
+                        style={{ opacity: active && !hiddenByLyric ? 1 : 0 }}
                         onFocus={() => {
                           setFocused(keyFor(cell.tick, verse));
                           editing.onSelect?.(bar.id, cell.tick, verse);
@@ -890,7 +1045,7 @@ export default function ScoreLyrics({
                       key={"move-" + cell.tick}
                       className="score-lyric-drag-handle"
                       data-lyric-drag={keyFor(cell.tick, verse)}
-                      data-lyric-drag-mode={editing.mode ?? "time"}
+                      data-lyric-drag-mode={editing.mode ?? "layout"}
                       transform={
                         "translate(" +
                         (cell.center + (moving ? drag.offsetX : 0)) +
@@ -905,16 +1060,12 @@ export default function ScoreLyrics({
                       role="button"
                       tabIndex={editing.locked ? -1 : 0}
                       aria-label={
-                        (editing.mode === "layout"
-                          ? "排版移动第 "
-                          : "移动第 ") +
+                        (layoutMode ? "排版移动第 " : "移动第 ") +
                         (verse + 1) +
                         " 行歌词“" +
                         cell.text +
-                        "”，方向键" +
-                        (editing.mode === "layout"
-                          ? "调整显示位置"
-                          : "微调起唱位置")
+                        "”，左右方向键" +
+                        (layoutMode ? "调整水平位置" : "微调起唱位置")
                       }
                       aria-disabled={editing.locked}
                       onPointerDown={(event) => startDrag(event, cell, verse)}
@@ -927,6 +1078,11 @@ export default function ScoreLyrics({
                       }}
                       onKeyDown={(event) => moveKey(event, cell, verse)}
                     >
+                      <title>
+                        {layoutMode
+                          ? "左右调整歌词显示位置，行内高度、唱音及起唱时间保持不变。"
+                          : "移动起唱时间：与唱音绑定的歌词会连同唱音一起移动，原延音连接可能改变。"}
+                      </title>
                       <rect
                         x={-9}
                         y={-5}
@@ -937,11 +1093,7 @@ export default function ScoreLyrics({
                         stroke="#b98157"
                       />
                       <path
-                        d={
-                          editing.mode === "layout"
-                            ? "M-4 0H4M0-3V3M-4 0L-2-2M-4 0L-2 2M4 0L2-2M4 0L2 2M0-3L-2-1M0-3L2-1M0 3L-2 1M0 3L2 1"
-                            : "M -5 0 H 5 M -5 0 L -2 -2 M -5 0 L -2 2 M 5 0 L 2 -2 M 5 0 L 2 2"
-                        }
+                        d="M -5 0 H 5 M -5 0 L -2 -2 M -5 0 L -2 2 M 5 0 L 2 -2 M 5 0 L 2 2"
                         fill="none"
                         stroke="#9b663f"
                         strokeWidth={1}

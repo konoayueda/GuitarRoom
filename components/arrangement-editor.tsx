@@ -33,9 +33,11 @@ import {
   ChevronRight,
 } from "lucide-react";
 import ScoreNoteTools from "./score-note-tools";
+import { ScoreStrokeTools } from "./score-stroke-tools";
 import { initialArrangementForScore } from "@/lib/score-key";
 import { ScoreContextMenu, type ScoreMenuEntry } from "./score-context-menu";
 import VocalTools from "./vocal-tools";
+import VocalRhythmTools from "./vocal-rhythm-tools";
 import {
   lyricLineCount,
   addLyricLine,
@@ -45,6 +47,8 @@ import {
   setLyricAnchor,
   setLyricLayout,
   setLyricExtend,
+  alignLyricPhrase,
+  lyricSyllables,
   lyricVocalNote,
   writtenVocalNotes,
   setVocalNote,
@@ -52,8 +56,11 @@ import {
   moveVocalNote,
   toggleVocalTie,
   vocalNoteDuration,
+  vocalInputAvailability,
+  type VocalInputAvailability,
 } from "@/lib/vocal-score";
 import { rhythmShape } from "@/lib/notation";
+import { resolveLyricFontSize } from "@/lib/lyric-style";
 import {
   cursorAt,
   cursorTick,
@@ -116,6 +123,73 @@ import { toast } from "sonner";
 export type ArrangementEditorHandle = {
   appendRecognition: (draft: RecognitionDraft) => void;
 };
+type EditorHistoryFrame = {
+  arrangement: Arrangement;
+  lane: "guitar" | "vocal" | "lyrics";
+  selected: ScoreSelection;
+  lyricCursor: { barId: string; tick: number; verse: number };
+  vocalCursor: { barId: string; tick: number };
+};
+type EditorHistoryEntry = EditorHistoryFrame | Arrangement;
+function normalizeEditorHistoryFrame(
+  entry: EditorHistoryEntry,
+  fallback: EditorHistoryFrame,
+): EditorHistoryFrame {
+  if ("arrangement" in entry) return entry;
+  const arrangement = entry;
+  const bars = listBars(arrangement);
+  const size = barTicks(arrangement.meter);
+  const validPoint = (point: { barId: string; tick: number }) => ({
+    barId: bars.some((item) => item.bar.id === point.barId)
+      ? point.barId
+      : (bars[0]?.bar.id ?? ""),
+    tick: Math.max(0, Math.min(size - 1, point.tick)),
+  });
+  const lyricCursor = {
+    ...validPoint(fallback.lyricCursor),
+    verse: Math.min(
+      lyricLineCount(arrangement) - 1,
+      fallback.lyricCursor.verse,
+    ),
+  };
+  const sourceLyric = listBars(fallback.arrangement)
+    .find((item) => item.bar.id === fallback.lyricCursor.barId)
+    ?.bar.lyrics?.find(
+      (lyric) =>
+        lyric.tick === fallback.lyricCursor.tick &&
+        lyric.verse === fallback.lyricCursor.verse,
+    );
+  const sourceVocalId = sourceLyric
+    ? lyricVocalNote(
+        fallback.arrangement,
+        fallback.lyricCursor.barId,
+        sourceLyric,
+      )?.id
+    : undefined;
+  if (sourceVocalId) {
+    const matches = bars.flatMap(({ bar }) =>
+      (bar.lyrics ?? [])
+        .filter(
+          (lyric) =>
+            lyric.verse === lyricCursor.verse &&
+            lyricVocalNote(arrangement, bar.id, lyric)?.id === sourceVocalId,
+        )
+        .map((lyric) => ({ barId: bar.id, tick: lyric.tick })),
+    );
+    if (matches.length === 1) Object.assign(lyricCursor, matches[0]);
+  }
+  return {
+    ...fallback,
+    arrangement,
+    selected: cursorAt(
+      arrangement,
+      cursorTick(fallback.arrangement, fallback.selected) ?? 0,
+      fallback.selected.stringIndex,
+    ) ?? { barId: "", eventId: "" },
+    lyricCursor,
+    vocalCursor: validPoint(fallback.vocalCursor),
+  };
+}
 export default function ArrangementEditor({
   ref,
   onRecognize,
@@ -156,7 +230,7 @@ export default function ArrangementEditor({
     tick: 0,
     verse: 0,
   });
-  const [lyricMode, setLyricMode] = useState<"time" | "layout">("time");
+  const [lyricMode, setLyricMode] = useState<"time" | "layout">("layout");
   const [lyricEntryMode, setLyricEntryMode] = useState<"auto" | "free">("auto");
   const [vocalDuration, setVocalDuration] = useState(12);
   const [playbackPart, setPlaybackPart] = useState<"both" | "guitar" | "vocal">(
@@ -178,8 +252,8 @@ export default function ArrangementEditor({
     eventId: "",
   });
   const [saving, setSaving] = useState(false),
-    [history, setHistory] = useState<Arrangement[]>([]),
-    [future, setFuture] = useState<Arrangement[]>([]);
+    [history, setHistory] = useState<EditorHistoryEntry[]>([]),
+    [future, setFuture] = useState<EditorHistoryEntry[]>([]);
   const [scope, setScope] = useState("all"),
     [from, setFrom] = useState(""),
     [to, setTo] = useState(""),
@@ -202,6 +276,9 @@ export default function ArrangementEditor({
   const linkedVocal = selectedLyric
     ? lyricVocalNote(value, lyricSelection.barId, selectedLyric)
     : undefined;
+  const phraseLength = selectedLyric
+    ? lyricSyllables(selectedLyric.text).length
+    : 0;
   const lyricEndOptions = linkedVocal
     ? writtenVocalNotes(value)
         .filter((n) => n.degree > 0 && n.startTick > linkedVocal.startTick)
@@ -221,9 +298,34 @@ export default function ArrangementEditor({
   const selectedVocal = bars
     .find((b) => b.bar.id === vocalCursor.barId)
     ?.bar.vocalNotes?.find((n) => n.tick === vocalCursor.tick);
-  const voiceDuration =
-    vocalNoteDuration(value, vocalCursor.barId, vocalCursor.tick) ??
-    vocalDuration;
+  const voiceDuration = selectedVocal?.durationTicks ?? vocalDuration;
+  const voiceAvailability =
+    bars.some((b) => b.bar.id === vocalCursor.barId) &&
+    Number.isInteger(vocalCursor.tick) &&
+    vocalCursor.tick >= 0 &&
+    vocalCursor.tick < limit
+      ? vocalInputAvailability(
+          value,
+          vocalCursor.barId,
+          vocalCursor.tick,
+          voiceDuration,
+          { scope: "segment" },
+        )
+      : undefined;
+  function voiceInputReason(
+    available: VocalInputAvailability,
+    duration = voiceDuration,
+  ) {
+    if (available.coveredBy) {
+      const note = available.coveredBy;
+      return `此位置仍在第 ${note.barNumber} 小节 · ${beatLabel(note.tick, value.meter)}的唱音 ${note.degree} 持续区间内。先缩短该音，或选择空白时段。`;
+    }
+    if (!available.fits)
+      return available.boundary === "note"
+        ? `到下个唱音只剩 ${durationLabel(available.availableTicks)}，当前${durationLabel(duration)}会覆盖它。请选择较短时值。`
+        : `距曲谱结尾只剩 ${durationLabel(available.availableTicks)}，当前${durationLabel(duration)}超出曲谱。请缩短时值或添加小节。`;
+    return "当前时值可写入；浅色区间表示已有唱音持续的时间。";
+  }
   const activeLaneCursor = lane === "vocal" ? vocalCursor : lyricSelection;
   const chosen = bars.find((b) => b.bar.id === selected.barId);
   const event = chosen?.bar.events.find((e) => e.id === selected.eventId);
@@ -286,13 +388,80 @@ export default function ArrangementEditor({
     label: `第 ${b.number} 小节 · ${b.section.label}`,
   }));
   const playingEvent = player.position?.event;
-  function change(next: Arrangement, coalesce = false) {
-    next = repairNoteLinks(next);
+  function historyFrame(): EditorHistoryFrame {
+    return {
+      arrangement: value,
+      lane,
+      selected: { ...selected },
+      lyricCursor: { ...lyricCursor },
+      vocalCursor: { ...vocalCursor },
+    };
+  }
+  function restoreHistoryCursor(frame: EditorHistoryFrame) {
+    setLane(frame.lane);
+    setSelected(frame.selected);
+    setLyricCursor(frame.lyricCursor);
+    setVocalCursor(frame.vocalCursor);
+    setAnchor(null);
+    setRangeMode(false);
+    requestAnimationFrame(() => {
+      let selector: string | undefined;
+      if (frame.lane === "lyrics")
+        selector =
+          '[data-lyric-cell="' +
+          CSS.escape(
+            frame.lyricCursor.barId +
+              ":" +
+              frame.lyricCursor.tick +
+              ":" +
+              frame.lyricCursor.verse,
+          ) +
+          '"]';
+      else if (frame.lane === "vocal")
+        selector =
+          '[data-vocal-cell="' +
+          CSS.escape(frame.vocalCursor.barId + ":" + frame.vocalCursor.tick) +
+          '"]';
+      else if (
+        frame.selected.tick !== undefined &&
+        frame.selected.stringIndex !== undefined
+      ) {
+        const bar = listBars(frame.arrangement).find(
+          (item) => item.bar.id === frame.selected.barId,
+        )?.bar;
+        if (!bar) return;
+        let tick = frame.selected.tick;
+        for (const event of bar.events) {
+          if (event.id === frame.selected.eventId) break;
+          tick += event.durationTicks;
+        }
+        selector =
+          '[data-note-cell="' +
+          CSS.escape(
+            frame.selected.barId +
+              ":" +
+              tick +
+              ":" +
+              frame.selected.stringIndex,
+          ) +
+          '"]';
+      }
+      const target = selector
+        ? document.querySelector<HTMLElement | SVGGElement>(
+            ".editable-score " + selector,
+          )
+        : undefined;
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }
+  function change(next: Arrangement, coalesce = false, preserveVoices = false) {
+    if (!preserveVoices) next = repairNoteLinks(next);
     lyricSession.current = { key: "", changed: false };
     if (locked || JSON.stringify(next) === JSON.stringify(value)) return;
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
-    if (!coalesce) setHistory((old) => [...old.slice(-29), value]);
+    if (!coalesce) setHistory((old) => [...old.slice(-29), historyFrame()]);
     setFuture([]);
     onDraft(
       JSON.stringify(next) === JSON.stringify(initialArrangement)
@@ -311,17 +480,15 @@ export default function ArrangementEditor({
     },
   }));
   function undo() {
+    lyricSession.current = { key: "", changed: false };
     if (locked || !history.length) return;
-    const old = history.at(-1)!;
-    const cursor = cursorAt(old, currentTick ?? 0, selected.stringIndex);
-    setSelected(cursor ?? { barId: "", eventId: "" });
-    setAnchor(null);
-    setRangeMode(false);
-    restoreFocus(cursor);
+    const frame = normalizeEditorHistoryFrame(history.at(-1)!, historyFrame());
+    const old = frame.arrangement;
+    restoreHistoryCursor(frame);
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
     setHistory((h) => h.slice(0, -1));
-    setFuture((f) => [...f, value]);
+    setFuture((f) => [...f, historyFrame()]);
     onDraft(
       JSON.stringify(old) === JSON.stringify(initialArrangement)
         ? undefined
@@ -329,16 +496,14 @@ export default function ArrangementEditor({
     );
   }
   function redo() {
+    lyricSession.current = { key: "", changed: false };
     if (locked || !future.length) return;
-    const next = future.at(-1)!;
-    const cursor = cursorAt(next, currentTick ?? 0, selected.stringIndex);
-    setSelected(cursor ?? { barId: "", eventId: "" });
-    setAnchor(null);
-    setRangeMode(false);
-    restoreFocus(cursor);
+    const frame = normalizeEditorHistoryFrame(future.at(-1)!, historyFrame());
+    const next = frame.arrangement;
+    restoreHistoryCursor(frame);
     digits.current = { cell: "", time: 0, value: "", changed: false };
     player.stop();
-    setHistory((h) => [...h, value]);
+    setHistory((h) => [...h, historyFrame()]);
     setFuture((f) => f.slice(0, -1));
     onDraft(
       JSON.stringify(next) === JSON.stringify(initialArrangement)
@@ -377,10 +542,12 @@ export default function ArrangementEditor({
     change(
       setLyricText(value, barId, tick, verse, nextText, lyricEntryMode),
       coalesce,
+      true,
     );
     lyricSession.current = { key, changed: true };
   }
   function chooseLane(next: "guitar" | "vocal" | "lyrics") {
+    if (next === "lyrics" && lane !== "lyrics") setLyricMode("layout");
     setLane(next);
     if (bars.length) {
       if (!bars.some((b) => b.bar.id === vocalCursor.barId))
@@ -395,11 +562,14 @@ export default function ArrangementEditor({
     setVocalCursor({ barId, tick });
     setAnchor(null);
     setRangeMode(false);
-    const duration = vocalNoteDuration(value, barId, tick);
+    const duration = bars
+      .find((item) => item.bar.id === barId)
+      ?.bar.vocalNotes?.find((note) => note.tick === tick)?.durationTicks;
     if (duration) setVocalDuration(Math.min(96, duration));
   }
   function selectLyric(barId: string, tick: number, verse: number) {
     if (locked) return;
+    if (lane !== "lyrics") setLyricMode("layout");
     setLane("lyrics");
     setLyricCursor({ barId, tick, verse });
     const lyric = bars
@@ -421,6 +591,8 @@ export default function ArrangementEditor({
             lyricSelection.verse,
             mode,
           ),
+          false,
+          true,
         );
       setLyricEntryMode(mode);
     } catch (error) {
@@ -436,7 +608,11 @@ export default function ArrangementEditor({
   ) {
     if (locked) return;
     try {
-      change(setLyricLayout(value, barId, tick, verse, offsetX, offsetY));
+      change(
+        setLyricLayout(value, barId, tick, verse, offsetX, offsetY),
+        false,
+        true,
+      );
     } catch (error) {
       toast.error((error as Error).message);
     }
@@ -452,6 +628,29 @@ export default function ArrangementEditor({
           lyricSelection.verse,
           id,
         ),
+        false,
+        true,
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  }
+  function alignSelectedLyrics() {
+    if (locked || phraseLength < 2) return;
+    try {
+      const result = alignLyricPhrase(
+        value,
+        lyricSelection.barId,
+        lyricSelection.tick,
+        lyricSelection.verse,
+      );
+      change(result.arrangement, false, true);
+      setLyricCursor(result.cursor);
+      setLyricEntryMode("auto");
+      setLyricMode("layout");
+      lyricSession.current = { key: "", changed: false };
+      toast.success(
+        `已将 ${result.count} 个字逐字对齐到唱音，可撤销这次分配。`,
       );
     } catch (error) {
       toast.error((error as Error).message);
@@ -471,14 +670,38 @@ export default function ArrangementEditor({
   function writeVocal(patch: Partial<ArrangementVocalNote>) {
     if (locked || !vocalCursor.barId) return;
     try {
+      const scope =
+        selectedVocal && patch.durationTicks === undefined && patch.degree !== 0
+          ? "chain"
+          : "segment";
+      const duration =
+        patch.durationTicks ??
+        (scope === "chain"
+          ? (vocalNoteDuration(value, vocalCursor.barId, vocalCursor.tick) ??
+            voiceDuration)
+          : voiceDuration);
+      const available = vocalInputAvailability(
+        value,
+        vocalCursor.barId,
+        vocalCursor.tick,
+        duration,
+        { scope },
+      );
+      if (!available.fits) throw Error(voiceInputReason(available, duration));
       change(
-        setVocalNote(value, vocalCursor.barId, vocalCursor.tick, {
-          degree: selectedVocal?.degree ?? 1,
-          octave: selectedVocal?.octave ?? 0,
-          accidental: selectedVocal?.accidental ?? 0,
-          durationTicks: voiceDuration,
-          ...patch,
-        }),
+        setVocalNote(
+          value,
+          vocalCursor.barId,
+          vocalCursor.tick,
+          {
+            degree: selectedVocal?.degree ?? 1,
+            octave: selectedVocal?.octave ?? 0,
+            accidental: selectedVocal?.accidental ?? 0,
+            ...patch,
+            durationTicks: duration,
+          },
+          { scope },
+        ),
       );
     } catch (error) {
       toast.error((error as Error).message);
@@ -488,6 +711,14 @@ export default function ArrangementEditor({
   function voiceDurationChange(ticks: number) {
     if (locked || !Number.isInteger(ticks) || ticks < 1 || ticks > 96) return;
     setVocalDuration(ticks);
+    const subdivision = String(
+      Math.min(Number(grid), rhythmShape(ticks)?.base ?? ticks, 12),
+    );
+    const gridValue = rhythmShape(ticks)?.triplet
+      ? String(Math.min(ticks, 16))
+      : subdivision;
+    if (GRID_OPTIONS.some((option) => option.value === gridValue))
+      setGrid(gridValue);
     if (selectedVocal) writeVocal({ durationTicks: ticks });
     else focusVocal();
   }
@@ -513,12 +744,15 @@ export default function ArrangementEditor({
       return;
     }
     try {
-      if (
-        bars
-          .find((b) => b.bar.id === barId)
-          ?.bar.lyrics?.some((l) => l.tick === tick && l.verse === verse)
-      )
-        change(setLyricPosition(value, barId, verse, tick, absolute));
+      const lyric = bars
+        .find((b) => b.bar.id === barId)
+        ?.bar.lyrics?.find((l) => l.tick === tick && l.verse === verse);
+      if (lyric)
+        change(
+          setLyricPosition(value, barId, verse, tick, absolute),
+          false,
+          !lyricVocalNote(value, barId, lyric),
+        );
       setLyricCursor({ barId: item.bar.id, tick: absolute % limit, verse });
     } catch (error) {
       toast.error((error as Error).message);
@@ -557,6 +791,26 @@ export default function ArrangementEditor({
       return;
     }
     lanePosition(item.bar.id, absolute % limit);
+  }
+  function moveVocalCursor(direction: number) {
+    const index = bars.findIndex((item) => item.bar.id === vocalCursor.barId);
+    if (locked || index < 0) return;
+    const current = index * limit + vocalCursor.tick;
+    let target = current + direction * voiceDuration;
+    const starts = writtenVocalNotes(value).map((note) => note.startTick);
+    const closer = starts.filter((start) =>
+      direction > 0
+        ? start > current && start < target
+        : start < current && start > target,
+    );
+    if (closer.length)
+      target = direction > 0 ? Math.min(...closer) : Math.max(...closer);
+    const item = bars[Math.floor(target / limit)];
+    if (item && target >= 0) {
+      const cursor = { barId: item.bar.id, tick: target % limit };
+      selectVocal(cursor.barId, cursor.tick);
+      focusVocal(cursor);
+    }
   }
   function vocalKey(
     event: KeyboardEvent<SVGGElement>,
@@ -599,17 +853,7 @@ export default function ArrangementEditor({
       });
     } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
-      const i = bars.findIndex((b) => b.bar.id === barId),
-        absolute =
-          i * limit +
-          tick +
-          (event.key === "ArrowRight" ? voiceDuration : -vocalDuration),
-        item = bars[Math.floor(absolute / limit)];
-      if (item && absolute >= 0) {
-        const next = { barId: item.bar.id, tick: absolute % limit };
-        selectVocal(next.barId, next.tick);
-        focusVocal(next);
-      }
+      moveVocalCursor(event.key === "ArrowRight" ? 1 : -1);
     } else if (["+", "=", "-", "_", ".", "/"].includes(event.key)) {
       event.preventDefault();
       const shape = rhythmShape(voiceDuration),
@@ -633,6 +877,51 @@ export default function ArrangementEditor({
           e.id === event.id ? { ...e, ...patch } : e,
         ),
       }));
+  }
+  function focusChordTarget(target: ScoreSelection) {
+    const bar = document.querySelector(
+      '.editable-score [data-preview-bar="' + CSS.escape(target.barId) + '"]',
+    );
+    const eventId = CSS.escape(target.eventId);
+    const hit =
+      bar?.querySelector<SVGGElement>(
+        '[data-score-chord-event="' + eventId + '"]',
+      ) ??
+      bar?.querySelector<SVGGElement>(
+        '[data-preview-event="' + eventId + '"] .score-chord-target',
+      );
+    hit?.focus({ preventScroll: true });
+  }
+  function applyStroke(
+    stroke: NonNullable<ArrangementEvent["stroke"]>,
+    target: ScoreSelection = selected,
+  ) {
+    if (locked) return;
+    const bar = bars.find(({ bar }) => bar.id === target.barId)?.bar;
+    const previous = bar?.events.find((event) => event.id === target.eventId);
+    if (!bar || !previous || (!previous.chord && !previous.notes?.length))
+      return;
+    setSelected({ ...target });
+    setLane("guitar");
+    setAnchor(null);
+    setRangeMode(false);
+    digits.current = { cell: "", time: 0, value: "", changed: false };
+    if (
+      (previous.stroke ?? (value.pattern === "strum" ? "down" : "pluck")) !==
+      stroke
+    ) {
+      editBar(bar.id, (bar) => ({
+        ...bar,
+        events: bar.events.map((event) =>
+          event.id === target.eventId ? { ...event, stroke } : event,
+        ),
+      }));
+    }
+    requestAnimationFrame(() => {
+      if (target.tick !== undefined && target.stringIndex !== undefined)
+        restoreFocus(target);
+      else focusChordTarget(target);
+    });
   }
   function focusCell(selection: ScoreSelection) {
     setSelected(selection);
@@ -694,7 +983,6 @@ export default function ArrangementEditor({
       setInputDuration(
         Math.min(96, scoreNoteDuration(value, selection) ?? n.durationTicks),
       );
-    if (selection.tick === undefined) setProperties(true);
   }
   function moveCursor(direction: number, extend = false) {
     if (locked || currentTick === undefined) return;
@@ -1177,9 +1465,8 @@ export default function ArrangementEditor({
     chordPickerTargetRef.current = null;
     setChordPickerTarget(null);
   }
-  function applyPickedChord(chord: Chord): boolean {
-    const target = chordPickerTargetRef.current;
-    if (locked || !target) return false;
+  function applyChordAt(chord: Chord, target: ScoreSelection): boolean {
+    if (locked) return false;
     try {
       const next = setScoreChord(value, target, chord);
       change(next.arrangement);
@@ -1191,21 +1478,16 @@ export default function ArrangementEditor({
       return false;
     }
   }
+  function applyPickedChord(chord: Chord): boolean {
+    const target = chordPickerTargetRef.current;
+    return target ? applyChordAt(chord, target) : false;
+  }
   function focusAfterChordPicker() {
     if (locked) return;
     requestAnimationFrame(() => {
       if (selected.tick !== undefined && selected.stringIndex !== undefined)
         restoreFocus();
-      else {
-        const bar = document.querySelector(
-          '[data-preview-bar="' + CSS.escape(selected.barId) + '"]',
-        );
-        const target =
-          bar?.querySelector<SVGGElement>(
-            '[data-score-chord-event="' + CSS.escape(selected.eventId) + '"]',
-          ) ?? bar?.querySelector<SVGGElement>(".score-chord-target");
-        target?.focus({ preventScroll: true });
-      }
+      else focusChordTarget(selected);
     });
   }
   const pickerBar = bars.find(({ bar }) => bar.id === chordPickerTarget?.barId);
@@ -1362,11 +1644,10 @@ export default function ArrangementEditor({
                   aria-label={`换成 ${name} 和弦`}
                   aria-pressed={event.chord?.name === name}
                   onClick={() =>
-                    editEvent({
-                      chord: structuredClone(
-                        CHORDS.find((c) => c.name === name)!,
-                      ),
-                    })
+                    applyChordAt(
+                      CHORDS.find((c) => c.name === name)!,
+                      { barId, eventId: event.id },
+                    )
                   }
                 >
                   {name}
@@ -1396,13 +1677,12 @@ export default function ArrangementEditor({
                       : "rest"
                   }
                   onChange={(v) => {
-                    if (v !== "-1")
-                      editEvent({
-                        chord:
-                          v === "rest"
-                            ? null
-                            : structuredClone(CHORDS[Number(v)]),
-                        ...(v === "rest" ? { notes: undefined } : {}),
+                    if (v === "rest")
+                      editEvent({ chord: null, notes: undefined });
+                    else if (v !== "-1")
+                      applyChordAt(CHORDS[Number(v)], {
+                        barId,
+                        eventId: event.id,
                       });
                   }}
                   options={[
@@ -1434,7 +1714,7 @@ export default function ArrangementEditor({
                     (value.pattern === "strum" ? "down" : "pluck")
                   }
                   onChange={(v) =>
-                    editEvent({ stroke: v as ArrangementEvent["stroke"] })
+                    applyStroke(v as NonNullable<ArrangementEvent["stroke"]>)
                   }
                   options={[
                     { value: "pluck", label: "同时拨弦" },
@@ -1497,11 +1777,15 @@ export default function ArrangementEditor({
         )}
         {event.notes !== undefined && (
           <div className="score-manual-notes">
-            <span>已单独编辑音符</span>
-            <button onClick={() => editEvent({ notes: undefined })}>
-              <RotateCcw size={12} />
-              恢复和弦音型
-            </button>
+            <span>
+              {event.notes.length ? "已单独编辑音符" : "暂未填写吉他音符"}
+            </span>
+            {event.chord && (
+              <button onClick={() => editEvent({ notes: undefined })}>
+                <RotateCcw size={12} />
+                {event.notes.length ? "恢复自动伴奏" : "生成自动伴奏"}
+              </button>
+            )}
           </div>
         )}
         {issue && (
@@ -1555,7 +1839,11 @@ export default function ArrangementEditor({
     setContextTarget(target);
     if (locked) return;
     if ("selection" in target) {
-      const tick = cursorTick(value, target.selection);
+      const selection =
+        target.kind === "guitar"
+          ? (target.sourceSelection ?? target.selection)
+          : target.selection;
+      const tick = cursorTick(value, selection);
       // Keep an existing passage when right-clicking inside its selection.
       if (
         target.kind === "guitar" &&
@@ -1569,7 +1857,7 @@ export default function ArrangementEditor({
       } else {
         setRangeMode(false);
         setAnchor(null);
-        select(target.selection);
+        select(selection);
       }
     } else if (target.kind === "vocal") selectVocal(target.barId, target.tick);
     else if (target.kind === "lyrics")
@@ -1614,17 +1902,12 @@ export default function ArrangementEditor({
           `[data-lyric-drag="${key}"], textarea[data-lyric-cell="${key}"]`,
         );
         target?.focus({ preventScroll: true });
-      } else if (selected.tick !== undefined) restoreFocus();
-      else {
-        const bar = document.querySelector(
-          `[data-preview-bar="${CSS.escape(selected.barId)}"]`,
-        );
-        bar
-          ?.querySelector<SVGGElement>(
-            ".score-diagram-target, .score-chord-target",
-          )
-          ?.focus({ preventScroll: true });
-      }
+      } else if (
+        selected.tick !== undefined &&
+        selected.stringIndex !== undefined
+      )
+        restoreFocus();
+      else focusChordTarget(selected);
     });
   }
   const contextBarId =
@@ -1683,6 +1966,37 @@ export default function ArrangementEditor({
         !contextChordCursor,
       ),
     ]);
+  }
+  if (
+    contextKind === "guitar" ||
+    contextKind === "chord" ||
+    contextKind === "bar"
+  ) {
+    const available =
+      !!contextChordEvent &&
+      !!(contextChordEvent.chord || contextChordEvent.notes?.length);
+    const stroke =
+      contextChordEvent?.stroke ??
+      (value.pattern === "strum" ? "down" : "pluck");
+    contextGroups.push(
+      (
+        [
+          ["pluck", "同时拨弦"],
+          ["down", "向下扫弦"],
+          ["up", "向上扫弦"],
+        ] as const
+      ).map(([option, label]) =>
+        menuItem(
+          "chord-" + option,
+          label,
+          () => {
+            if (contextChordCursor) applyStroke(option, contextChordCursor);
+          },
+          !available,
+          available && stroke === option,
+        ),
+      ),
+    );
   }
   if (contextKind === "guitar" || contextKind === "vocal") {
     const setDuration =
@@ -1874,10 +2188,16 @@ export default function ArrangementEditor({
         );
       }),
       menuItem(
+        "lyric-align-phrase",
+        "逐字对齐唱音",
+        alignSelectedLyrics,
+        phraseLength < 2,
+      ),
+      menuItem(
         "lyric-add-line",
         "增加一行歌词",
         () => {
-          change(addLyricLine(value));
+          change(addLyricLine(value), false, true);
           setLyricCursor({ ...lyricSelection, verse: lines });
         },
         lines >= 8,
@@ -2007,28 +2327,6 @@ export default function ArrangementEditor({
         "拆分这段和弦",
         split,
         !event || event.durationTicks < 2,
-      ),
-      menuItem(
-        "chord-pluck",
-        "同时拨弦",
-        () => editEvent({ stroke: "pluck" }),
-        false,
-        event?.stroke === "pluck",
-      ),
-      menuItem(
-        "chord-down",
-        "向下扫弦",
-        () => editEvent({ stroke: "down" }),
-        false,
-        (event?.stroke ?? (value.pattern === "strum" ? "down" : "pluck")) ===
-          "down",
-      ),
-      menuItem(
-        "chord-up",
-        "向上扫弦",
-        () => editEvent({ stroke: "up" }),
-        false,
-        event?.stroke === "up",
       ),
     ]);
   }
@@ -2198,7 +2496,7 @@ export default function ArrangementEditor({
             />
           </label>
           <label>
-            默认奏法
+            自动伴奏音型
             <Choice
               label="试听音型"
               value={value.pattern}
@@ -2206,7 +2504,7 @@ export default function ArrangementEditor({
                 change({ ...value, pattern: v as Arrangement["pattern"] })
               }
               options={[
-                { value: "strum", label: "和弦扫奏" },
+                { value: "strum", label: "整组和弦" },
                 { value: "arpeggio", label: "八分分解" },
               ]}
             />
@@ -2249,6 +2547,26 @@ export default function ArrangementEditor({
           ))}
           <span>吉他与人声共用节拍，各自编排</span>
         </div>
+        {lane === "vocal" && (
+          <VocalRhythmTools
+            duration={voiceDuration}
+            onDuration={voiceDurationChange}
+            locked={locked}
+            canWrite={!!vocalCursor.barId && voiceAvailability?.fits !== false}
+            onRest={() => writeVocal({ degree: 0, octave: 0, accidental: 0 })}
+            onTie={voiceTie}
+            canTie={!!selectedVocal && selectedVocal.degree !== 0}
+            tied={!!selectedVocal?.tieToNext}
+            onMove={moveVocalCursor}
+            location={
+              "第 " +
+              (bars.find((item) => item.bar.id === vocalCursor.barId)?.number ??
+                1) +
+              " 小节 · " +
+              beatLabel(vocalCursor.tick, value.meter)
+            }
+          />
+        )}
         {lane === "guitar" ? (
           <ScoreNoteTools
             duration={currentDuration}
@@ -2323,7 +2641,7 @@ export default function ArrangementEditor({
             }
             onAddLine={() => {
               try {
-                change(addLyricLine(value));
+                change(addLyricLine(value), false, true);
                 setLyricCursor({ ...lyricSelection, verse: lines });
               } catch (error) {
                 toast.error((error as Error).message);
@@ -2331,7 +2649,11 @@ export default function ArrangementEditor({
             }}
             onDeleteLine={() => {
               try {
-                change(removeLyricLine(value, lyricSelection.verse));
+                change(
+                  removeLyricLine(value, lyricSelection.verse),
+                  false,
+                  true,
+                );
                 setLyricCursor({
                   ...lyricSelection,
                   verse: Math.min(lyricSelection.verse, lines - 2),
@@ -2361,10 +2683,35 @@ export default function ArrangementEditor({
                 y,
               )
             }
+            lyricFontSize={value.lyricFontSize}
+            onLyricFontSize={(size) =>
+              change(
+                { ...value, lyricFontSize: resolveLyricFontSize(size) },
+                false,
+                true,
+              )
+            }
             lyricEndOptions={lyricEndOptions}
             onLyricExtend={extendLyric}
+            onAlignPhrase={alignSelectedLyrics}
+            phraseLength={phraseLength}
             vocal={selectedVocal}
             vocalDuration={voiceDuration}
+            inputStatus={
+              voiceAvailability
+                ? {
+                    fits: voiceAvailability.fits,
+                    reason: voiceInputReason(voiceAvailability),
+                    suggestedDuration: voiceAvailability.suggestedDuration,
+                  }
+                : undefined
+            }
+            gridLabel={
+              GRID_OPTIONS.find((option) => option.value === grid)?.label ??
+              "当前网格"
+            }
+            grid={grid}
+            onGrid={setGrid}
             onDuration={voiceDurationChange}
             onPitch={writeVocal}
             onFocus={focusVocal}
@@ -2392,6 +2739,40 @@ export default function ArrangementEditor({
             onRedo={redo}
             canUndo={!!history.length}
             canRedo={!!future.length}
+          />
+        )}
+        {lane === "guitar" && (
+          <ScoreStrokeTools
+            stroke={
+              event?.stroke ??
+              (event ? (value.pattern === "strum" ? "down" : "pluck") : "pluck")
+            }
+            onStroke={(stroke) => applyStroke(stroke)}
+            locked={locked}
+            enabled={!!event && !!(event.chord || event.notes?.length)}
+            canChooseChord={!!event}
+            chordName={event?.chord?.name}
+            location={
+              chosen && event
+                ? "第 " +
+                  chosen.number +
+                  " 小节 · " +
+                  beatLabel(
+                    chosen.bar.events
+                      .slice(0, chosen.bar.events.indexOf(event))
+                      .reduce((sum, event) => sum + event.durationTicks, 0),
+                    value.meter,
+                  ) +
+                  "起"
+                : "点击谱面选择位置"
+            }
+            onChooseChord={() =>
+              openChordPicker(
+                event?.chord
+                  ? { barId: selected.barId, eventId: selected.eventId }
+                  : selected,
+              )
+            }
           />
         )}
         {lane === "guitar" && currentTick !== undefined && (
@@ -2534,6 +2915,13 @@ export default function ArrangementEditor({
                       key: barId + ":" + tick + ":" + verse,
                       changed: false,
                     };
+                  },
+                  onLyricEnd: () => {
+                    lyricSession.current = { key: "", changed: false };
+                  },
+                  onLyricHistory: (command) => {
+                    if (command === "redo") redo();
+                    else undo();
                   },
                   range: anchor ? selectionSpan : undefined,
                   sectionHeading: (id, si) => {

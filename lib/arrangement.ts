@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { CHORDS, type Chord } from "./chords";
 import { legacyArrangementSchema } from "./arrangement-legacy";
+import {
+  MAX_LYRIC_FONT_SIZE,
+  MIN_LYRIC_FONT_SIZE,
+  MAX_LYRIC_HORIZONTAL_OFFSET,
+} from "./lyric-style";
 
 const id = z.string().min(1).max(100);
 const fingering = z
@@ -18,6 +23,12 @@ const arrangementShape = z
     meter: z.enum(["4/4", "3/4", "6/8"]),
     pattern: z.enum(["strum", "arpeggio"]),
     lyricLineCount: z.number().int().min(1).max(8).optional(),
+    lyricFontSize: z
+      .number()
+      .int()
+      .min(MIN_LYRIC_FONT_SIZE)
+      .max(MAX_LYRIC_FONT_SIZE)
+      .optional(),
     vocalKey: z
       .enum(["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"])
       .optional(),
@@ -43,7 +54,11 @@ const arrangementShape = z
                             text: z.string().min(1).max(120),
                             anchorMode: z.enum(["auto", "free"]).optional(),
                             vocalNoteId: id.optional(),
-                            offsetX: z.number().min(-96).max(96).optional(),
+                            offsetX: z
+                              .number()
+                              .min(-MAX_LYRIC_HORIZONTAL_OFFSET)
+                              .max(MAX_LYRIC_HORIZONTAL_OFFSET)
+                              .optional(),
                             offsetY: z.number().min(-24).max(24).optional(),
                             endVocalNoteId: id.optional(),
                           })
@@ -301,6 +316,7 @@ export function makeEvent(
   return {
     id: crypto.randomUUID(),
     chord: chord ? structuredClone(chord) : null,
+    stroke: "pluck",
     durationTicks,
   };
 }

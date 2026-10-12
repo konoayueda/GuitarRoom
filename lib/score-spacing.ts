@@ -1,12 +1,68 @@
 export type SpacingSpan = { start: number; end: number };
+export type SpacingOptions = { proportional?: boolean };
 
-/** Keep ordinary spacing, but space equal tuplet onsets evenly across extra grid points. */
+/** Paper spacing follows engraving points; proportional editing follows musical time. */
 export function scoreSpacing(
   grid: number[],
   spans: SpacingSpan[],
   width: number,
   limit: number,
+  options?: SpacingOptions,
 ) {
+  if (options?.proportional) {
+    const usableLimit = Number.isFinite(limit) && limit > 0 ? limit : 1;
+    const ticks = grid.filter((tick) => Number.isFinite(tick) && tick >= 0);
+    const timeline = Math.max(usableLimit, ...ticks);
+    const points = [
+      ...new Set([
+        0,
+        timeline,
+        ...ticks,
+        ...spans
+          .flatMap((span) => [span.start, span.end])
+          .filter(
+            (tick) => Number.isFinite(tick) && tick >= 0 && tick <= timeline,
+          ),
+      ]),
+    ].sort((a, b) => a - b);
+    // Glyph padding stays fixed when new editable points are added.
+    const step = 24;
+    const safeWidth = Number.isFinite(width) ? Math.max(61, width) : 480;
+    const contentWidth = safeWidth - 60;
+    const centerAt = (tick: number) => 42 + (contentWidth * tick) / timeline;
+    const x = (tick: number) => centerAt(tick) - step / 2;
+    const tickAt = (px: number) =>
+      Math.max(
+        0,
+        Math.min(
+          usableLimit - 1,
+          Math.round(((px - 42) * timeline) / contentWidth),
+        ),
+      );
+    const editablePoints = points.filter((tick) => tick < usableLimit);
+    const cellBounds = (tick: number) => {
+      if (!Number.isFinite(tick) || tick < 0 || tick >= usableLimit)
+        return { x: safeWidth - 8, width: 0 };
+      const next = editablePoints.findIndex((point) => point >= tick);
+      const exact = next >= 0 && editablePoints[next] === tick;
+      const previous =
+        next < 0 ? editablePoints.at(-1) : editablePoints[next - 1];
+      const following =
+        next < 0 ? undefined : editablePoints[next + (exact ? 1 : 0)];
+      const center = centerAt(tick);
+      const clamp = (px: number) => Math.max(26, Math.min(safeWidth - 8, px));
+      const left = clamp(
+        previous === undefined ? 26 : (centerAt(previous) + center) / 2,
+      );
+      const right = clamp(
+        following === undefined
+          ? safeWidth - 8
+          : (center + centerAt(following)) / 2,
+      );
+      return { x: left, width: Math.max(0, right - left) };
+    };
+    return { points, step, x, tickAt, cellBounds };
+  }
   const step = (width - 42) / (grid.length - 1);
   const basePosition = (tick: number) => {
     const end = grid.findIndex((point) => point > tick);
@@ -68,5 +124,26 @@ export function scoreSpacing(
       ),
     );
   };
-  return { points, step, x, tickAt };
+  const cellBounds = (tick: number) => ({ x: x(tick), width: step });
+  return { points, step, x, tickAt, cellBounds };
+}
+
+/** Reserve space for written attacks without depending on transient editing grid points. */
+export function minimumEditorMeasureWidth(
+  onsetsByVoice: readonly (readonly number[])[],
+  ticks: number,
+) {
+  const timeline = Number.isFinite(ticks) && ticks > 0 ? ticks : 24;
+  let density = 1;
+  for (const voice of onsetsByVoice) {
+    const buckets = new Map<number, number>();
+    for (const onset of new Set(voice)) {
+      if (!Number.isFinite(onset) || onset < 0 || onset >= timeline) continue;
+      const bucket = Math.floor(onset / 24);
+      const count = (buckets.get(bucket) ?? 0) + 1;
+      buckets.set(bucket, count);
+      density = Math.max(density, count);
+    }
+  }
+  return Math.max(480, Math.ceil((timeline / 24) * density * 34 + 60));
 }
