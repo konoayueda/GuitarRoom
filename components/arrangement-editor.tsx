@@ -106,7 +106,7 @@ import {
 import {
   putScoreNote,
   removeScoreNote,
-  setNoteDuration,
+  setOnsetDuration,
   scoreNoteDuration,
   scoreTieAvailability,
   toggleScoreTie,
@@ -338,9 +338,16 @@ export default function ArrangementEditor({
             n.stringIndex === selected.stringIndex,
         )
       : undefined;
-  const currentDuration = scoreNoteDuration(value, selected) ?? inputDuration;
-  const selectionSpan = scoreSpan(value, selected, anchor, currentDuration);
   const allWritten = writtenNotes(value);
+  const onsetWritten =
+    currentTick === undefined
+      ? []
+      : allWritten.filter((n) => n.startTick === currentTick);
+  const currentDuration =
+    scoreNoteDuration(value, selected) ??
+    onsetWritten[0]?.durationTicks ??
+    inputDuration;
+  const selectionSpan = scoreSpan(value, selected, anchor, currentDuration);
   const selectedWritten = allWritten.find(
     (n) =>
       n.eventId === selected.eventId &&
@@ -1019,9 +1026,7 @@ export default function ArrangementEditor({
               n.startTick >= selectionSpan.start &&
               n.startTick < selectionSpan.end,
           )
-        : selectedWritten
-          ? [selectedWritten]
-          : [];
+        : onsetWritten;
     try {
       // Resize each selected tie chain once; continuations belong to their selected head.
       const continued = new Set(
@@ -1031,15 +1036,20 @@ export default function ArrangementEditor({
           .filter(Boolean)
           .map((n) => n!.eventId + ":" + n!.offsetTick + ":" + n!.stringIndex),
       );
-      let next = value;
-      for (const note of [...targets].reverse()) {
+      const onsets = new Map<number, (typeof targets)[number]>();
+      for (const note of targets) {
         if (
-          continued.has(
+          !continued.has(
             note.eventId + ":" + note.offsetTick + ":" + note.stringIndex,
           )
         )
-          continue;
-        next = setNoteDuration(
+          onsets.set(note.startTick, note);
+      }
+      let next = value;
+      for (const note of [...onsets.values()].sort(
+        (a, b) => b.startTick - a.startTick,
+      )) {
+        next = setOnsetDuration(
           next,
           {
             barId: note.barId,
@@ -1060,7 +1070,7 @@ export default function ArrangementEditor({
         if (GRID_OPTIONS.some((option) => option.value === subdivision))
           setGrid(subdivision);
       }
-      if (targets.length) change(next);
+      if (targets.length) change(next, false, true);
     } catch (error) {
       toast.error((error as Error).message);
     }
@@ -1240,7 +1250,11 @@ export default function ArrangementEditor({
               value,
               selection,
               fret,
-              scoreNoteDuration(value, selection) ?? inputDuration,
+              scoreNoteDuration(value, selection) ??
+                allWritten.find(
+                  (n) => n.startTick === cursorTick(value, selection),
+                )?.durationTicks ??
+                inputDuration,
               marker,
             ),
         coalesce,
@@ -1589,9 +1603,9 @@ export default function ArrangementEditor({
             {note && written && (
               <>
                 <label>
-                  音符时值
+                  同拍时值
                   <Choice
-                    label="当前音符时值"
+                    label="当前拍音符时值"
                     value={String(currentDuration)}
                     options={durationOptions(96, currentDuration)}
                     onChange={(v) => applyDuration(Number(v))}
@@ -1621,7 +1635,7 @@ export default function ArrangementEditor({
             )}
             <small>
               X / × 随当前和弦拨弦；数字直接指定品位，0
-              为空弦。换和弦会保留音符位置与时值。
+              为空弦。同拍多弦一起调整时值，品位和延音仍按弦编辑。换和弦会保留音符位置与时值。
             </small>
           </div>
         ) : (

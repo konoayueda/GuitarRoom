@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowUp,
   ArrowDown,
-  ChevronLeft,
   ChevronRight,
   Maximize2,
   Minimize2,
@@ -22,7 +21,15 @@ import {
   NotebookPen,
   ScanLine,
   X,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -92,6 +99,7 @@ export default function Reader({
 }) {
   const metronome = useMetronome();
   const [mode, setMode] = useState("score");
+  const [readerMenuOpen, setReaderMenuOpen] = useState(false);
   const [narrow, setNarrow] = useState(false),
     [toolsOpen, setToolsOpen] = useState(false);
   useEffect(() => {
@@ -302,7 +310,7 @@ export default function Reader({
         return;
       if (
         (e.target as HTMLElement).closest(
-          "input,textarea,[role=dialog],[role=combobox]",
+          "input,textarea,[role=dialog],[role=combobox],[role=listbox],[role=option],[role=menu]",
         )
       )
         return;
@@ -540,6 +548,7 @@ export default function Reader({
         <Tabs
           value={mode}
           onValueChange={(v) => {
+            setReaderMenuOpen(false);
             cropStart.current = null;
             setCropMode(false);
             setCropSelection(null);
@@ -574,46 +583,27 @@ export default function Reader({
       <div className={"reader-body " + (mode !== "score" ? "arranging" : "")}>
         <div className="reader-workspace">
           <div className="original-score-workspace">
-            <div className="performance-entry">
-              <div>
-                <strong>放下鼠标，拿起吉他</strong>
-                <span>整份原谱连续展开，倒计时后自动滚动</span>
-              </div>
-              <button className="button primary" onClick={openPerformance}>
-                <Play size={17} />
-                进入演奏阅读
-              </button>
-            </div>
-            <ScorePageStrip
-              pages={score.pages}
-              index={index}
-              onNavigate={navigate}
-              canvasRef={canvasRef}
-              ready={ready}
-            />
-            <div className="reader-tools">
-              <div className="tool-group">
-                <button
-                  className={
-                    "button " + (cropMode ? "primary" : "secondary-button")
-                  }
-                  disabled={!ready}
-                  onClick={() =>
-                    cropMode ? setCropMode(false) : openRecognition()
-                  }
-                >
-                  <ScanLine size={15} />
-                  {cropMode
-                    ? "正在框选"
-                    : recognitionDraft
-                      ? "继续校对"
-                      : "框选识别"}
-                  {recognitionDraft && <i className="draft-dot" />}
-                </button>
+            <div
+              className="reader-tools compact-reader-tools"
+              role="toolbar"
+              aria-label="原谱阅读工具栏"
+            >
+              <ScorePageStrip
+                pages={score.pages}
+                index={index}
+                onNavigate={navigate}
+                canvasRef={canvasRef}
+                ready={ready}
+                active={mode === "score" && !performing}
+              />
+              <div className="reader-tool-actions">
                 <button
                   className={
                     "button " + (marking ? "primary" : "secondary-button")
                   }
+                  aria-label={marking ? "结束圈选批注" : "圈选批注"}
+                  aria-pressed={marking}
+                  title={marking ? "结束圈选批注" : "在谱面圈出一段并添加批注"}
                   disabled={!ready}
                   onClick={() => {
                     setCropMode(false);
@@ -621,63 +611,103 @@ export default function Reader({
                   }}
                 >
                   <PenLine size={15} />
-                  {marking ? "在谱上拖动圈选" : "圈选批注"}
+                  {marking ? "结束批注" : "批注"}
                 </button>
-                <button
-                  className="icon-button"
-                  aria-label={showNotes ? "隐藏批注" : "显示批注"}
-                  onClick={() => setShowNotes((v) => !v)}
+                <Choice
+                  label="曲谱缩放"
+                  value={zoom}
+                  onChange={setZoom}
+                  options={["75", "100", "125", "150"].map((v) => ({
+                    value: v,
+                    label: v === "100" ? "适合宽度" : v + "%",
+                  }))}
+                />
+                <DropdownMenu
+                  open={readerMenuOpen && mode === "score" && !performing}
+                  onOpenChange={setReaderMenuOpen}
                 >
-                  {showNotes ? <Eye size={17} /> : <EyeOff size={17} />}
-                </button>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className={
+                        "icon-button reader-more-tools" +
+                        (cropMode ? " is-active" : "")
+                      }
+                      aria-label="更多原谱工具"
+                      title="更多：批注显隐、旋转、框选识别"
+                    >
+                      <MoreHorizontal size={19} />
+                      {recognitionDraft && <i className="draft-dot" />}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="reader-tools-menu"
+                  >
+                    <DropdownMenuItem onSelect={() => setShowNotes((v) => !v)}>
+                      {showNotes ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showNotes ? "隐藏批注" : "显示批注"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        void rotate();
+                      }}
+                    >
+                      <RotateCw size={16} />
+                      顺时针旋转页面
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={!ready}
+                      onSelect={() =>
+                        cropMode ? setCropMode(false) : openRecognition()
+                      }
+                    >
+                      <ScanLine size={16} />
+                      {cropMode
+                        ? "取消框选识别"
+                        : recognitionDraft
+                          ? "继续校对"
+                          : "框选识别"}
+                      {recognitionDraft && <i className="draft-dot" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div className="reader-primary-actions">
+                {(arrangementDraft || score.arrangement) && (
+                  <button
+                    className="button secondary-button reader-arrangement-link"
+                    aria-label={
+                      arrangementDraft ? "返回编排草稿" : "查看已保存编排"
+                    }
+                    title={
+                      arrangementDraft
+                        ? "编排还有未保存的修改，返回继续编辑"
+                        : "查看已保存的完整编排"
+                    }
+                    onClick={() => {
+                      cropStart.current = null;
+                      setCropMode(false);
+                      setCropSelection(null);
+                      setMode(arrangementDraft ? "arrange" : "read");
+                    }}
+                  >
+                    <NotebookPen size={15} />
+                    <span>{arrangementDraft ? "编排草稿" : "已存编排"}</span>
+                    {arrangementDraft && <i className="draft-dot" />}
+                  </button>
+                )}
                 <button
-                  className="icon-button"
-                  aria-label="顺时针旋转页面"
-                  onClick={rotate}
+                  className="button primary reader-performance-button"
+                  aria-label="进入演奏阅读"
+                  title="连续展开整份原谱，倒计时后自动滚动"
+                  onClick={openPerformance}
                 >
-                  <RotateCw size={17} />
+                  <Play size={16} />
+                  演奏阅读
                 </button>
               </div>
-              <Choice
-                label="曲谱缩放"
-                value={zoom}
-                onChange={setZoom}
-                options={["75", "100", "125", "150"].map((v) => ({
-                  value: v,
-                  label: v === "100" ? "适合宽度" : v + "%",
-                }))}
-              />
             </div>
-            {(arrangementDraft || score.arrangement) && !cropMode && (
-              <div className="reader-version-notice" role="note">
-                <NotebookPen size={19} aria-hidden="true" />
-                <p>
-                  <strong>
-                    {arrangementDraft
-                      ? "编排还有未保存的修改"
-                      : "已有保存的编排"}
-                  </strong>
-                  <span>
-                    {arrangementDraft
-                      ? "当前显示上传原谱，返回编排即可继续编辑并保存。"
-                      : "已保存的谱面可在「编排阅读」中完整查看与练习。"}
-                  </span>
-                </p>
-                <button
-                  className="button secondary-button"
-                  onClick={() => {
-                    cropStart.current = null;
-                    setCropMode(false);
-                    setCropSelection(null);
-
-                    setMode(arrangementDraft ? "arrange" : "read");
-                  }}
-                >
-                  {arrangementDraft ? "返回编排草稿" : "查看已保存编排"}
-                  <ChevronRight size={15} />
-                </button>
-              </div>
-            )}
             {cropMode && (
               <div className="recognition-crop-hint">
                 <ScanLine size={17} />
@@ -811,33 +841,6 @@ export default function Reader({
                   </div>
                 )}
               </div>
-            </div>
-            <div className="reader-bottom">
-              <div className="tool-group">
-                <button
-                  className="icon-button"
-                  disabled={index === 0}
-                  aria-label="上一页"
-                  onClick={() => navigate(index - 1)}
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <span>
-                  第 {index + 1} / {score.pages.length} 页
-                </span>
-                <button
-                  className="icon-button"
-                  disabled={index >= score.pages.length - 1}
-                  aria-label="下一页"
-                  onClick={() => navigate(index + 1)}
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-              <button className="button primary" onClick={openPerformance}>
-                <Play size={16} />
-                演奏阅读 · 自动滚谱
-              </button>
             </div>
           </div>
         </div>

@@ -515,7 +515,7 @@ export default function PerformanceReader({
       }}
     >
       <DialogContent
-        className="performance-reader"
+        className="performance-reader top-0 left-0 translate-x-0 translate-y-0"
         showCloseButton={false}
         onOpenAutoFocus={(event) => {
           event.preventDefault();

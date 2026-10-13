@@ -116,7 +116,7 @@ export default function ScoreNoteTools({
           {bases.map((n) => (
             <button
               key={n}
-              title={durationLabel(n)}
+              title={durationLabel(n) + "；同拍多弦一起调整"}
               aria-label={"输入" + durationLabel(n)}
               aria-pressed={base === n}
               disabled={locked}
@@ -131,7 +131,7 @@ export default function ScoreNoteTools({
           <button
             disabled={locked || !Number.isInteger(dotted) || dotted > 96}
             aria-label="附点（.）"
-            title="附点 / 复附点（.）"
+            title="附点 / 复附点（.）；同拍多弦一起调整"
             aria-pressed={!!shape?.dots}
             onClick={() => onDuration(dotted)}
           >
@@ -268,7 +268,7 @@ export default function ScoreNoteTools({
         <p className="gp-triplet-help" role="status">
           {durationLabel(duration)}：三个音合计 {(duration * 3) / 24} 拍。
           输入一个品位后按 →，再输入下一个音；三个音齐全后显示连梁与括号 3。
-          已有音符只改变时值，起音位置保持原位。
+          同拍的所有弦一起改变时值，起音位置保持原位。
         </p>
       )}
       {help && (
@@ -298,7 +298,7 @@ export default function ScoreNoteTools({
             <kbd>Space</kbd> 试听 · <kbd>Ctrl/Cmd+S</kbd> 保存
           </span>
           <p>
-            点击只移动光标；在同一拍上下换弦可写和音。延音连接后面的同音；后面没有同音时会补上续音，支持跨小节。粘贴会覆盖目标范围，并保留片段的和弦、奏法与休止。
+            点击只移动光标；在同一拍上下换弦可写和音，同拍多弦共用时值，新加弦音沿用该拍时值。品位与延音逐弦编辑；后面没有同音时会补上续音，支持跨小节。粘贴会覆盖目标范围，并保留片段的和弦、奏法与休止。
           </p>
         </div>
       )}

@@ -69,13 +69,14 @@ function replaceNotes(
   a: Arrangement,
   owned: WrittenNote[],
   additions: Map<string, Note[]>,
+  preserveUnchanged = false,
 ) {
   const keys = new Set(owned.map(noteKey));
   const touched = new Set([
     ...owned.map((n) => n.eventId),
     ...additions.keys(),
   ]);
-  return repairNoteLinks({
+  const result: Arrangement = {
     ...a,
     sections: a.sections.map((section) => ({
       ...section,
@@ -86,7 +87,10 @@ function replaceNotes(
             ? {
                 ...event,
                 notes: [
-                  ...explicitNotes(event, a).filter(
+                  ...(preserveUnchanged && event.notes
+                    ? event.notes
+                    : explicitNotes(event, a)
+                  ).filter(
                     (n) => !keys.has(noteKey({ ...n, eventId: event.id })),
                   ),
                   ...(additions.get(event.id) ?? []),
@@ -100,7 +104,20 @@ function replaceNotes(
         ),
       })),
     })),
-  });
+  };
+  if (preserveUnchanged) return result;
+  const repaired = repairNoteLinks(result);
+  // Guitar-only edits must not normalize a separate vocal or lyric track.
+  return {
+    ...result,
+    sections: result.sections.map((section, i) => ({
+      ...section,
+      bars: section.bars.map((bar, j) => ({
+        ...bar,
+        events: repaired.sections[i].bars[j].events,
+      })),
+    })),
+  };
 }
 
 /** Clear a written note and its tied continuation, retaining other voices. */
@@ -113,13 +130,14 @@ export function removeScoreNote(
 }
 
 /** Write one musical duration, splitting only at bar lines with tied continuations. */
-export function putScoreNote(
+function planScoreNote(
   a: Arrangement,
   cursor: ScoreCursor,
   fret: number,
   ticks: number,
   marker?: "cross",
-): Arrangement {
+  inheritOnset = true,
+) {
   const start = cursorTick(a, cursor),
     stringIndex = cursor.stringIndex,
     size = barTicks(a.meter),
@@ -141,10 +159,22 @@ export function putScoreNote(
     owned = forwardChain(notes, note),
     previousTicks = owned.reduce((sum, n) => sum + n.durationTicks, 0),
     ownedKeys = new Set(owned.map(noteKey));
+  const sameOnset =
+    inheritOnset && !note
+      ? notes.find((n) => n.barId === cursor.barId && n.startTick === start)
+      : undefined;
+  if (sameOnset) {
+    if (!Number.isInteger(ticks) || ticks < 1 || ticks > 96)
+      throw Error("音符时值须在三十二分三连音到全音符之间。");
+    ticks = sameOnset.durationTicks;
+  }
   // Changing pitch can retain an existing long tie chain beyond the duration palette.
   if (
     !Number.isInteger(ticks) ||
-    !((ticks >= 2 && ticks <= 96) || (note && ticks === previousTicks))
+    !(
+      (ticks >= (sameOnset ? 1 : 2) && ticks <= 96) ||
+      (note && ticks === previousTicks)
+    )
   )
     throw Error("音符时值须在三十二分三连音到全音符之间。");
   const end = start + ticks;
@@ -193,9 +223,83 @@ export function putScoreNote(
     additions.set(event.id, [...(additions.get(event.id) ?? []), part]);
     onset = stop;
   }
+  return { owned, additions };
+}
+
+/** Write one musical duration, splitting only at bar lines with tied continuations. */
+export function putScoreNote(
+  a: Arrangement,
+  cursor: ScoreCursor,
+  fret: number,
+  ticks: number,
+  marker?: "cross",
+): Arrangement {
+  const { owned, additions } = planScoreNote(a, cursor, fret, ticks, marker);
   const result = replaceNotes(a, owned, additions);
   if (!arrangementSchema.safeParse(result).success)
     throw Error("无法写入这个长音，请检查小节时值、音符数量和和弦按法。");
+  return result;
+}
+
+/** One rhythmic onset is one editable group, even when several strings sound. */
+export function setOnsetDuration(
+  a: Arrangement,
+  cursor: ScoreCursor,
+  ticks: number,
+): Arrangement {
+  if (!Number.isInteger(ticks) || ticks < 2 || ticks > 96)
+    throw Error("音符时值须在三十二分三连音到全音符之间。");
+  const start = cursorTick(a, cursor),
+    group = writtenNotes(a).filter(
+      (note) => note.barId === cursor.barId && note.startTick === start,
+    );
+  if (!group.length) throw Error("请先选择一个音符，再修改时值。");
+  const owned: WrittenNote[] = [],
+    additions = new Map<string, Note[]>();
+  // Plan every string against the original snapshot. Any collision aborts the
+  // whole onset, so a later string cannot silently clip an earlier edit.
+  for (const note of group) {
+    const plan = planScoreNote(
+      a,
+      {
+        barId: note.barId,
+        eventId: note.eventId,
+        tick: note.offsetTick,
+        stringIndex: note.stringIndex,
+      },
+      note.fret,
+      ticks,
+      note.marker,
+      false,
+    );
+    owned.push(...plan.owned);
+    for (const [eventId, notes] of plan.additions) {
+      const replacements = notes.map((part) => {
+        if (
+          eventId !== note.eventId ||
+          part.offsetTick !== note.offsetTick ||
+          !note.explicit
+        )
+          return part;
+        const head = {
+          ...note.explicit,
+          durationTicks: part.durationTicks,
+        };
+        if (part.tieToNext) {
+          head.tieToNext = true;
+          delete head.sustainTicks;
+        } else if (head.tieToNext) head.tieToNext = false;
+        return head;
+      });
+      additions.set(eventId, [
+        ...(additions.get(eventId) ?? []),
+        ...replacements,
+      ]);
+    }
+  }
+  const result = replaceNotes(a, owned, additions, true);
+  if (!arrangementSchema.safeParse(result).success)
+    throw Error("无法修改这组音符的时值，请检查小节容量和和弦按法。");
   return result;
 }
 
